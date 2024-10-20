@@ -1,0 +1,28 @@
+
+# Ignore .env file
+.env
+
+# Ignore build outputs
+bin/
+obj/
+
+# Ignore user-specific files (e.g., Visual Studio)
+*.user
+*.rsuser
+*.suo
+
+# Ignore package dependencies
+packages/
+.vscode/
+
+# Ignore Rider-specific files
+.idea/
+.idea_modules/
+.idea/*
+
+# Ignore macOS-specific files
+.DS_Store
+
+# Ignore logs and lock files
+*.log
+*.lock

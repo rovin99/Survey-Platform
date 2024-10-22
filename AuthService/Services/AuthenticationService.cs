@@ -39,12 +39,12 @@ public class AuthenticationService : IAuthService
             Username = username,
             Email = email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
-            RoleId = role.RoleId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _userRepository.CreateAsync(user);
+        await _userRepository.AddUserRoleAsync(user.UserId, role.RoleId);
         return user;
     }
 
@@ -77,26 +77,58 @@ public class AuthenticationService : IAuthService
     }
 
     private string GenerateJwtToken(User user)
-    {
-        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
-        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-
-        var claims = new[]
         {
-            new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email),
-            new Claim(ClaimTypes.Role, user.Role.RoleName),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-        };
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
-        var token = new JwtSecurityToken(
-            issuer: _configuration["Jwt:Issuer"],
-            audience: _configuration["Jwt:Audience"],
-            claims: claims,
-            expires: DateTime.Now.AddMinutes(Convert.ToDouble(_configuration["Jwt:DurationInMinutes"])),
-            signingCredentials: credentials
-        );
+            var roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList();
+            var claims = new List<Claim>
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            };
+            claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+            var token = new JwtSecurityToken(
+                issuer: _configuration["Jwt:Issuer"],
+                audience: _configuration["Jwt:Audience"],
+                claims: claims,
+                expires: DateTime.Now.AddMinutes(Convert.ToDouble(_configuration["Jwt:DurationInMinutes"])),
+                signingCredentials: credentials
+            );
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+    public async Task<List<User>> GetAllUsersAsync()
+    {
+        return await _userRepository.GetAllUsersAsync();
+    }
+
+    public async Task AddUserRoleAsync(int userId, string roleName)
+    {
+        var role = await _roleRepository.GetByNameAsync(roleName);
+        if (role == null)
+        {
+            throw new Exception($"Role '{roleName}' not found.");
+        }
+
+        await _userRepository.AddUserRoleAsync(userId, role.RoleId);
+    }
+
+    public async Task RemoveUserRoleAsync(int userId, string roleName)
+    {
+        var role = await _roleRepository.GetByNameAsync(roleName);
+        if (role == null)
+        {
+            throw new Exception($"Role '{roleName}' not found.");
+        }
+
+        await _userRepository.RemoveUserRoleAsync(userId, role.RoleId);
+    }
+
+    public async Task<bool> IsAdminAsync(int userId)
+    {
+        return await _userRepository.HasRoleAsync(userId, "Admin");
     }
 }

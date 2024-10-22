@@ -5,7 +5,8 @@ using Microsoft.IdentityModel.Tokens;
 using AuthService.Services;
 using Npgsql.EntityFrameworkCore.PostgreSQL;
 using Microsoft.EntityFrameworkCore;
-
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using DotNetEnv; // Add this
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,7 +23,12 @@ builder.Configuration["Jwt:DurationInMinutes"] = Environment.GetEnvironmentVaria
 
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -55,7 +61,7 @@ builder.Services.AddScoped<IAuthService, AuthenticationService>();
 var app = builder.Build();
 
 // Seed roles in the database
-await DatabaseSeeder.SeedRoles(app.Services);
+await DatabaseSeeder.SeedRolesAndUsers(app.Services);
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())

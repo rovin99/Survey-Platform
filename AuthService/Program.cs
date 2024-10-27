@@ -51,6 +51,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
         };
     });
+    builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowNextJS",
+        builder =>
+        {
+            builder.WithOrigins("http://localhost:3000")
+                   .AllowAnyMethod()
+                   .AllowAnyHeader();
+        });
+});
+
+
 
 // Register repositories and services
 builder.Services.AddScoped<IUserRepository, UserRepository>();
@@ -69,7 +81,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
+// In Configure method:
+app.UseCors("AllowNextJS");
 app.UseHttpsRedirection();
 
 // Use custom JWT middleware

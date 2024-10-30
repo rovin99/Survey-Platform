@@ -1,110 +1,228 @@
-
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using AuthService.Models;
+using AuthService.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authorization;
 using AuthService.Models.DTOs;
-namespace AuthService.Controllers
+using System.ComponentModel.DataAnnotations;
+using System.Net;
+
+namespace AuthService.Controllers 
 {
-[ApiController]
-[Route("api/[controller]")]
-public class AuthController : ControllerBase
-{
-    private readonly IAuthService _authService;
-
-    public AuthController(IAuthService authService)
+    [ApiController]
+    [Route("api/[controller]")]
+    public class AuthController : ControllerBase 
     {
-        _authService = authService;
+        private readonly IAuthService _authService;
+
+        public AuthController(IAuthService authService)
+        {
+            _authService = authService;
+        }
+
+        [HttpPost("register")]
+        public async Task<ActionResult<ApiResponse<UserDTO>>> Register([FromBody] RegisterUserDTO model)
+        {
+            // Validation
+            var validationErrors = ValidateRegistration(model);
+            if (validationErrors.Any())
+            {
+                return BadRequest(ResponseUtil.Error<UserDTO>(
+                    "Validation failed",
+                    "VALIDATION_ERROR",
+                    validationErrors
+                ));
+            }
+
+            try
+            {
+                var user = await _authService.RegisterUserAsync(model.Username, model.Email, model.Password, "User");
+                return Ok(ResponseUtil.Success(
+                    UserDTO.FromUser(user),
+                    "User registered successfully"
+                ));
+            }
+            catch (Exception ex) when (ex.Message.Contains("duplicate"))
+            {
+                return Conflict(ResponseUtil.Error<UserDTO>(
+                    "Username or email already exists",
+                    "DUPLICATE_ERROR",
+                    statusCode: (int)HttpStatusCode.Conflict
+                ));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ResponseUtil.Error<UserDTO>(
+                    "Registration failed",
+                    "REGISTRATION_ERROR",
+                    ex.Message
+                ));
+            }
+        }
+
+        [HttpPost("login")]
+        public async Task<ActionResult<ApiResponse<LoginResponseDTO>>> Login([FromBody] LoginModel model)
+        {
+            if (string.IsNullOrEmpty(model?.Username) || string.IsNullOrEmpty(model?.Password))
+            {
+                return BadRequest(ResponseUtil.Error<LoginResponseDTO>(
+                    "Username and password are required",
+                    "VALIDATION_ERROR"
+                ));
+            }
+
+            try
+            {
+                var token = await _authService.LoginAsync(model.Username, model.Password);
+                var response = new LoginResponseDTO { Token = token };
+                return Ok(ResponseUtil.Success(response, "Login successful"));
+            }
+            catch (Exception)
+            {
+                return Unauthorized(ResponseUtil.Error<LoginResponseDTO>(
+                    "Invalid username or password",
+                    "INVALID_CREDENTIALS",
+                    statusCode: (int)HttpStatusCode.Unauthorized
+                ));
+            }
+        }
+
+        [Authorize]
+        [HttpGet("user")]
+        public async Task<ActionResult<ApiResponse<UserDTO>>> GetUser()
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            {
+                return BadRequest(ResponseUtil.Error<UserDTO>(
+                    "Invalid user identifier in token",
+                    "INVALID_TOKEN"
+                ));
+            }
+
+            var user = await _authService.GetUserByIdAsync(userId);
+            if (user == null)
+            {
+                return NotFound(ResponseUtil.NotFound<UserDTO>("User not found"));
+            }
+
+            return Ok(ResponseUtil.Success(UserDTO.FromUser(user)));
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpGet("users")]
+        public async Task<ActionResult<ApiResponse<List<UserDTO>>>> GetAllUsers()
+        {
+            try
+            {
+                var users = await _authService.GetAllUsersAsync();
+                var userDtos = users.Select(UserDTO.FromUser).ToList();
+                return Ok(ResponseUtil.Success(userDtos, "Users retrieved successfully"));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ResponseUtil.Error<List<UserDTO>>(
+                    "Failed to retrieve users",
+                    "RETRIEVAL_ERROR",
+                    ex.Message
+                ));
+            }
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("users/{userId}/roles")]
+        public async Task<ActionResult<ApiResponse<object>>> AddUserRole(int userId, [FromBody] UserRoleUpdateModel model)
+        {
+            if (userId != model.UserId)
+            {
+                return BadRequest(ResponseUtil.Error<object>(
+                    "User ID mismatch",
+                    "ID_MISMATCH"
+                ));
+            }
+
+            try
+            {
+                await _authService.AddUserRoleAsync(userId, model.RoleName);
+                return Ok(ResponseUtil.Success<object>(
+                    null,
+                    $"Role '{model.RoleName}' added to user successfully"
+                ));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ResponseUtil.Error<object>(
+                    "Failed to add role",
+                    "ROLE_UPDATE_ERROR",
+                    ex.Message
+                ));
+            }
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpDelete("users/{userId}/roles")]
+        public async Task<ActionResult<ApiResponse<object>>> RemoveUserRole(int userId, [FromBody] UserRoleUpdateModel model)
+        {
+            if (userId != model.UserId)
+            {
+                return BadRequest(ResponseUtil.Error<object>(
+                    "User ID mismatch",
+                    "ID_MISMATCH"
+                ));
+            }
+
+            try
+            {
+                await _authService.RemoveUserRoleAsync(userId, model.RoleName);
+                return Ok(ResponseUtil.Success<object>(
+                    null,
+                    $"Role '{model.RoleName}' removed from user successfully"
+                ));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ResponseUtil.Error<object>(
+                    "Failed to remove role",
+                    "ROLE_UPDATE_ERROR",
+                    ex.Message
+                ));
+            }
+        }
+
+        private List<string> ValidateRegistration(RegisterUserDTO model)
+        {
+            var errors = new List<string>();
+
+            if (string.IsNullOrEmpty(model.Username) || model.Username.Length < 2 || model.Username.Length > 20)
+            {
+                errors.Add("Username must be between 2 and 20 characters");
+            }
+
+            if (!System.Text.RegularExpressions.Regex.IsMatch(model.Username, @"^[a-zA-Z0-9_]+$"))
+            {
+                errors.Add("Username must contain only letters, numbers and underscore");
+            }
+
+            if (string.IsNullOrEmpty(model.Email) || !new EmailAddressAttribute().IsValid(model.Email))
+            {
+                errors.Add("A valid email address is required");
+            }
+
+            if (string.IsNullOrEmpty(model.Password) || model.Password.Length < 6)
+            {
+                errors.Add("Password must be at least 6 characters long");
+            }
+
+            return errors;
+        }
     }
 
-    [HttpPost("register")]
-    public async Task<IActionResult> Register(RegisterModel model)
+    public class LoginResponseDTO
     {
-        try
-        {
-            var user = await _authService.RegisterUserAsync(model.Username, model.Email, model.Password, "User");
-            return Ok("User registered successfully.");
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(ex.Message);
-        }
+        public string Token { get; set; }
     }
-
-    [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginModel model)
-    {   if (model == null)
-    {
-        return BadRequest("Invalid login data");
-    }
-        try
-        {
-            var token = await _authService.LoginAsync(model.Username,model.Password);
-            return Ok(new { Token = token });
-        }
-        catch (Exception ex)
-        {
-            return Unauthorized(ex.Message);
-        }
-    }
-
-    [Authorize]
-    [HttpGet("user")]
-    public async Task<IActionResult> GetUser()
-    {
-        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-        var user = await _authService.GetUserByIdAsync(userId);
-        return Ok(user);
-    }
-
-    [Authorize(Roles = "Admin")]
-    [HttpGet("users")]
-    public async Task<IActionResult> GetAllUsers()
-    {
-        try
-        {
-            var users = await _authService.GetAllUsersAsync();
-            var userDtos = users.Select(UserDTO.FromUser).ToList();
-            return Ok(userDtos);
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(ex.Message);
-        }
-    }
-
-    [Authorize(Roles = "Admin")]
-    [HttpPost("users/{userId}/roles")]
-    public async Task<IActionResult> AddUserRole(int userId, [FromBody] UserRoleUpdateModel model)
-    {
-        try
-        {
-            await _authService.AddUserRoleAsync(userId, model.RoleName);
-            return Ok($"Role '{model.RoleName}' added to user successfully.");
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(ex.Message);
-        }
-    }
-
-    [Authorize(Roles = "Admin")]
-    [HttpDelete("users/{userId}/roles")]
-    public async Task<IActionResult> RemoveUserRole(int userId, [FromBody] UserRoleUpdateModel model)
-    {
-        try
-        {
-            await _authService.RemoveUserRoleAsync(userId, model.RoleName);
-            return Ok($"Role '{model.RoleName}' removed from user successfully.");
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(ex.Message);
-        }
-    }
-}
 }

@@ -3,6 +3,9 @@
 ## Overview
 The Authentication Service is a .NET-based RESTful API that provides user authentication, registration, and role management functionality. This service uses JWT (JSON Web Tokens) for authentication and supports role-based access control.
 
+## Flow Diagram
+
+
 ## Base URL
 ```
 /api/Auth

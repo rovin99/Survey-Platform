@@ -12,6 +12,7 @@ namespace AuthService.Models.DTOs
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public List<string> Roles { get; set; }
+        public string Token { get; set; }
 
         public static UserDTO FromUser(User user)
         {

@@ -87,4 +87,11 @@ public class UserRepository : IUserRepository
             .AnyAsync(ur => ur.UserId == userId && 
                            ur.Role.RoleName.ToLower() == roleName.ToLower());
     }
+    // public async Task<User> GetByRefreshTokenAsync(string refreshToken)
+    // {
+    //     return await _context.Users
+    //         .Include(u => u.UserRoles)
+    //         .ThenInclude(ur => ur.Role)
+    //         .FirstOrDefaultAsync(u => u.RefreshToken == refreshToken);
+    // }
 }

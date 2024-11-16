@@ -1,6 +1,6 @@
 // src/app/login/page.tsx
 'use client';
-
+import { useAuth } from '@/context/AuthContext';
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -17,9 +17,11 @@ import { useRouter } from "next/navigation"
 import { authService } from "@/services/auth.service"
 
 export default function LoginPage() {
+  
   const router = useRouter();
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const { login, error: authError } = useAuth();
   const [formData, setFormData] = useState({
     username: '',
     password: ''
@@ -32,24 +34,34 @@ export default function LoginPage() {
     });
   };
 
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-
+  
     try {
-      await authService.login({
+      const result = await authService.login({
         username: formData.username,
         password: formData.password
       });
-      router.push('/'); // Redirect to home page after successful login
+      
+      // Ensure we have a token before redirecting
+      if (result.data.token) {
+        // Force a small delay to ensure token is properly set
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 100);
+      } else {
+        setError('Authentication failed');
+      }
     } catch (err) {
       setError('Invalid username or password');
     } finally {
       setLoading(false);
     }
   };
-
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <Card className="w-[400px]">

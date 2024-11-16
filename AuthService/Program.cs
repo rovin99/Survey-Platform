@@ -20,8 +20,6 @@ builder.Configuration["Jwt:Issuer"] = Environment.GetEnvironmentVariable("JWT_IS
 builder.Configuration["Jwt:Audience"] = Environment.GetEnvironmentVariable("JWT_AUDIENCE");
 builder.Configuration["Jwt:DurationInMinutes"] = Environment.GetEnvironmentVariable("JWT_DURATION");
 
-
-
 // Add services to the container.
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -29,8 +27,13 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
         options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
     });
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IAuthService, AuthenticationService>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IRoleRepository, RoleRepository>();
 
 // Configure PostgreSQL with Entity Framework Core
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -51,44 +54,35 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
         };
     });
-    builder.Services.AddCors(options =>
+
+// Configure CORS
+builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowNextJS",
         builder =>
         {
-            builder.WithOrigins("http://localhost:3000")
-                   .AllowAnyMethod()
-                   .AllowAnyHeader();
+            builder
+                .WithOrigins("http://localhost:3000")
+                .AllowAnyMethod()
+                .AllowAnyHeader()
+                .AllowCredentials();
         });
 });
 
-
-
-// Register repositories and services
-builder.Services.AddScoped<IUserRepository, UserRepository>();
-builder.Services.AddScoped<IRoleRepository, RoleRepository>();
-builder.Services.AddScoped<IAuthService, AuthenticationService>();
-
-// Build the app
 var app = builder.Build();
 
-// Seed roles in the database
-await DatabaseSeeder.SeedRolesAndUsers(app.Services);
-
-// Configure the HTTP request pipeline
+// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-// In Configure method:
-app.UseCors("AllowNextJS");
+
 app.UseHttpsRedirection();
 
-// Use custom JWT middleware
-app.UseMiddleware<JwtMiddleware>();
+// Add CORS middleware - this must be called before Authentication and Authorization
+app.UseCors("AllowNextJS");
 
-// Use authentication and authorization
 app.UseAuthentication();
 app.UseAuthorization();
 

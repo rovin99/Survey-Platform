@@ -24,72 +24,76 @@ namespace AuthService.Controllers
             _authService = authService;
         }
 
+        
         [HttpPost("register")]
-        public async Task<ActionResult<ApiResponse<UserDTO>>> Register([FromBody] RegisterUserDTO model)
+    public async Task<ActionResult<ApiResponse<UserDTO>>> Register([FromBody] RegisterUserDTO model)
+    {
+        // Validation
+        var validationErrors = ValidateRegistration(model);
+        if (validationErrors.Any())
         {
-            // Validation
-            var validationErrors = ValidateRegistration(model);
-            if (validationErrors.Any())
-            {
-                return BadRequest(ResponseUtil.Error<UserDTO>(
-                    "Validation failed",
-                    "VALIDATION_ERROR",
-                    validationErrors
-                ));
-            }
-
-            try
-            {
-                var user = await _authService.RegisterUserAsync(model.Username, model.Email, model.Password, "User");
-                return Ok(ResponseUtil.Success(
-                    UserDTO.FromUser(user),
-                    "User registered successfully"
-                ));
-            }
-            catch (Exception ex) when (ex.Message.Contains("duplicate"))
-            {
-                return Conflict(ResponseUtil.Error<UserDTO>(
-                    "Username or email already exists",
-                    "DUPLICATE_ERROR",
-                    statusCode: (int)HttpStatusCode.Conflict
-                ));
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ResponseUtil.Error<UserDTO>(
-                    "Registration failed",
-                    "REGISTRATION_ERROR",
-                    ex.Message
-                ));
-            }
+            return BadRequest(ResponseUtil.Error<UserDTO>(
+                "Validation failed",
+                "VALIDATION_ERROR",
+                validationErrors
+            ));
         }
 
-        [HttpPost("login")]
-        public async Task<ActionResult<ApiResponse<LoginResponseDTO>>> Login([FromBody] LoginModel model)
+        try
         {
-            if (string.IsNullOrEmpty(model?.Username) || string.IsNullOrEmpty(model?.Password))
-            {
-                return BadRequest(ResponseUtil.Error<LoginResponseDTO>(
-                    "Username and password are required",
-                    "VALIDATION_ERROR"
-                ));
-            }
-
-            try
-            {
-                var token = await _authService.LoginAsync(model.Username, model.Password);
-                var response = new LoginResponseDTO { Token = token };
-                return Ok(ResponseUtil.Success(response, "Login successful"));
-            }
-            catch (Exception)
-            {
-                return Unauthorized(ResponseUtil.Error<LoginResponseDTO>(
-                    "Invalid username or password",
-                    "INVALID_CREDENTIALS",
-                    statusCode: (int)HttpStatusCode.Unauthorized
-                ));
-            }
+            var (user, accessToken) = await _authService.RegisterUserAsync(model.Username, model.Email, model.Password, "User");
+            var userDto = UserDTO.FromUser(user);
+            userDto.Token = accessToken; // Assuming UserDTO has a Token property
+            
+            return Ok(ResponseUtil.Success(
+                userDto,
+                "User registered successfully"
+            ));
         }
+        catch (Exception ex) when (ex.Message.Contains("duplicate"))
+        {
+            return Conflict(ResponseUtil.Error<UserDTO>(
+                "Username or email already exists",
+                "DUPLICATE_ERROR",
+                statusCode: (int)HttpStatusCode.Conflict
+            ));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ResponseUtil.Error<UserDTO>(
+                "Registration failed",
+                "REGISTRATION_ERROR",
+                ex.Message
+            ));
+        }
+    }
+
+    [HttpPost("login")]
+    public async Task<ActionResult<ApiResponse<LoginResponseDTO>>> Login([FromBody] LoginModel model)
+    {
+        if (string.IsNullOrEmpty(model?.Username) || string.IsNullOrEmpty(model?.Password))
+        {
+            return BadRequest(ResponseUtil.Error<LoginResponseDTO>(
+                "Username and password are required",
+                "VALIDATION_ERROR"
+            ));
+        }
+
+        try
+        {
+            var (accessToken, user) = await _authService.LoginAsync(model.Username, model.Password);
+            var response = new LoginResponseDTO { Token = accessToken };
+            return Ok(ResponseUtil.Success(response, "Login successful"));
+        }
+        catch (Exception)
+        {
+            return Unauthorized(ResponseUtil.Error<LoginResponseDTO>(
+                "Invalid username or password",
+                "INVALID_CREDENTIALS",
+                statusCode: (int)HttpStatusCode.Unauthorized
+            ));
+        }
+    }
 
         [Authorize]
         [HttpGet("user")]
@@ -219,6 +223,90 @@ namespace AuthService.Controllers
 
             return errors;
         }
+
+        [Authorize]
+        [HttpGet("verify")]
+        public ActionResult<ApiResponse<object>> VerifyToken()
+{
+    var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+    if (userIdClaim == null)
+    {
+        return Unauthorized(ResponseUtil.Error<object>(
+            "Invalid token",
+            "INVALID_TOKEN",
+            statusCode: (int)HttpStatusCode.Unauthorized
+        ));
+    }
+
+    // If we reach here, the token is valid
+    return Ok(ResponseUtil.Success<object>(
+        null,
+        "Token is valid"
+    ));
+}
+
+        // [HttpPost("refresh-token")]
+        // public async Task<ActionResult<ApiResponse<string>>> RefreshToken()
+        // {
+        //     try
+        //     {
+        //         var newAccessToken = await _authService.RefreshTokenAsync();
+        //         return Ok(ResponseUtil.Success(
+        //             newAccessToken,
+        //             "Token refreshed successfully"
+        //         ));
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         return Unauthorized(ResponseUtil.Error<string>(
+        //             "Failed to refresh token",
+        //             "REFRESH_TOKEN_ERROR",
+        //             statusCode: (int)HttpStatusCode.Unauthorized
+        //         ));
+        //     }
+        // }
+        [HttpPost("refresh-token")]
+public async Task<ActionResult<ApiResponse<string>>> RefreshToken()
+{
+    try
+    {
+        var newAccessToken = await _authService.RefreshTokenAsync();
+        return Ok(ResponseUtil.Success(
+            new { token = newAccessToken },
+            "Token refreshed successfully"
+        ));
+    }
+    catch (Exception ex)
+    {
+        return Unauthorized(ResponseUtil.Error<string>(
+            ex.Message,
+            "REFRESH_TOKEN_ERROR",
+            statusCode: (int)HttpStatusCode.Unauthorized
+        ));
+    }
+}
+        [Authorize]
+        [HttpPost("logout")]
+        public async Task<ActionResult<ApiResponse<object>>> Logout()
+        {
+            try
+            {
+                await _authService.LogoutAsync();
+                return Ok(ResponseUtil.Success<object>(
+                    null,
+                    "Logged out successfully"
+                ));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ResponseUtil.Error<object>(
+                    "Logout failed",
+                    "LOGOUT_ERROR",
+                    ex.Message
+                ));
+            }
+        }
+        
     }
 
     public class LoginResponseDTO

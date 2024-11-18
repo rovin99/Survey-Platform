@@ -1,6 +1,5 @@
 package response
 
-import "net/http"
 
 type ErrorDetail struct {
 	Message string      `json:"message"`

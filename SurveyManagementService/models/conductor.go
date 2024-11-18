@@ -27,12 +27,15 @@ type Conductor struct {
 	UpdatedAt     time.Time    `json:"updated_at"`
 }
 
+
+
 type ConductorRegistrationRequest struct {
-	Name          string       `json:"name" validate:"required"`
-	Type          ConductorType `json:"type" validate:"required,oneof=INSTITUTE COMPANY"`
-	Description   string       `json:"description" validate:"required"`
-	ContactEmail  string       `json:"contact_email" validate:"required,email"`
-	ContactPhone  string       `json:"contact_phone" validate:"required"`
-	Address       string       `json:"address" validate:"required"`
-	OfficialEmail string       `json:"official_email" validate:"required,email"`
+	Name          string        `json:"name"`
+	Type          ConductorType `json:"type"` // Enum: INDIVIDUAL, INSTITUTE, COMPANY
+	Description   string        `json:"description"`
+	ContactEmail  string        `json:"contact_email"`
+	ContactPhone  string        `json:"contact_phone"`
+	Address       string        `json:"address"`
+	OfficialEmail string        `json:"official_email"`
 }
+

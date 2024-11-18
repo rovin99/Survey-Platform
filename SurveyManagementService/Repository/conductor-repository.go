@@ -1,5 +1,10 @@
 package repository
+import (
 
+
+	"gorm.io/gorm" 
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+)
 type ConductorRepository struct {
 	db *gorm.DB
 }
@@ -26,4 +31,11 @@ func (r *ConductorRepository) GetByOfficialEmail(email string) (*models.Conducto
 
 func (r *ConductorRepository) UpdateVerificationStatus(id uint, isVerified bool) error {
 	return r.db.Model(&models.Conductor{}).Where("id = ?", id).Update("is_verified", isVerified).Error
+}
+func (r *ConductorRepository) GetByID(conductorID uint) (*models.Conductor, error) {
+    var conductor models.Conductor
+    if err := r.db.First(&conductor, conductorID).Error; err != nil {
+        return nil, err
+    }
+    return &conductor, nil
 }

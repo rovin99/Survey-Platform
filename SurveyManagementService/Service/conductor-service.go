@@ -3,12 +3,22 @@ package service
 import (
 	"crypto/rand"
 	"encoding/hex"
+
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+	"github.com/go-redis/redis/v8"
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+	
 )
 
 type ConductorService struct {
 	conductorRepo *repository.ConductorRepository
 	emailService *EmailService
-	cache        *redis.Client // For storing verification codes
+	cache        *redis.Client 
 }
 
 func NewConductorService(cr *repository.ConductorRepository, es *EmailService, cache *redis.Client) *ConductorService {
@@ -19,7 +29,7 @@ func NewConductorService(cr *repository.ConductorRepository, es *EmailService, c
 	}
 }
 
-func (s *ConductorService) RegisterConductor(userID uint, req *ConductorRegistrationRequest) error {
+func (s *ConductorService) RegisterConductor(userID uint, req *models.ConductorRegistrationRequest) error {
 	// Validate conductor type
 	if req.Type != models.ConductorTypeInstitute && req.Type != models.ConductorTypeCompany {
 		return errors.New("invalid conductor type")
@@ -106,4 +116,12 @@ func (s *ConductorService) VerifyEmail(conductorID uint, code string) error {
 	// Delete verification code
 	return s.cache.Del(context.Background(), 
 		fmt.Sprintf("conductor_verification:%d", conductorID)).Err()
+}
+func (s *ConductorService) GetByID(conductorID uint) (*models.Conductor, error) {
+    // Fetch the conductor record by ID from the repository
+    conductor, err := s.conductorRepo.GetByID(conductorID)
+    if err != nil {
+        return nil, err
+    }
+    return conductor, nil
 }

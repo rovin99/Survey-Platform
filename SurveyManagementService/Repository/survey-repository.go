@@ -1,5 +1,10 @@
 package repository
+import (
 
+
+	"gorm.io/gorm" 
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/models" 
+)
 type SurveyRepository struct {
 	db *gorm.DB
 }
@@ -37,4 +42,14 @@ func (r *SurveyRepository) Delete(id uint) error {
 		}
 		return nil
 	})
+}
+//GetAll
+
+func (r *SurveyRepository) GetAll() ([]models.Survey, error) {
+	var surveys []models.Survey
+	err := r.db.Preload("Questions").Preload("Requirements").Find(&surveys).Error
+	if err != nil {
+		return nil, err
+	}
+	return surveys, nil
 }

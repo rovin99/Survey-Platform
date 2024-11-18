@@ -78,7 +78,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// app.UseHttpsRedirection();
 
 // Add CORS middleware - this must be called before Authentication and Authorization
 app.UseCors("AllowNextJS");

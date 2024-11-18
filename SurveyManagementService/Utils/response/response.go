@@ -2,6 +2,7 @@ package response
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"net/http"
 )
 
 // Success creates a successful API response

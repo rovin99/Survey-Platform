@@ -15,6 +15,7 @@ namespace AuthService.Services
         private readonly IRoleRepository _roleRepository;
         private readonly IConfiguration _configuration;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IDistributedCache _cache;
 
     public AuthenticationService(
         IUserRepository userRepository, 
@@ -123,6 +124,8 @@ namespace AuthService.Services
 
         private (string AccessToken, string RefreshToken) GenerateTokens(User user)
         {
+            var tokenId = Guid.NewGuid().ToString();
+            var refreshTokenId = Guid.NewGuid().ToString();
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 

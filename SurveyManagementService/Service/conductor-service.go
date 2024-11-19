@@ -18,14 +18,17 @@ import (
 type ConductorService struct {
 	conductorRepo *repository.ConductorRepository
 	emailService *EmailService
-	cache        *redis.Client 
+	cache        *redis.Client
+	authService  *AuthService 
 }
 
-func NewConductorService(cr *repository.ConductorRepository, es *EmailService, cache *redis.Client) *ConductorService {
+func NewConductorService(cr *repository.ConductorRepository, es *EmailService, cache *redis.Client, as *AuthService) *ConductorService {
 	return &ConductorService{
 		conductorRepo: cr,
 		emailService: es,
 		cache: cache,
+		authService: as,
+
 	}
 }
 
@@ -36,9 +39,9 @@ func (s *ConductorService) RegisterConductor(userID uint, req *models.ConductorR
 	}
 
 	// Check email domain based on type
-	if err := s.validateOfficialEmail(req.OfficialEmail, req.Type); err != nil {
-		return err
-	}
+	// if err := s.validateOfficialEmail(req.OfficialEmail, req.Type); err != nil {
+	// 	return err
+	// }
 
 	conductor := &models.Conductor{
 		UserID:        userID,
@@ -55,6 +58,13 @@ func (s *ConductorService) RegisterConductor(userID uint, req *models.ConductorR
 	if err := s.conductorRepo.Create(conductor); err != nil {
 		return err
 	}
+
+	// Assign conductor role
+    if err := s.authService.AssignConductorRole(userID); err != nil {
+        // If role assignment fails, you might want to rollback the conductor creation
+        s.conductorRepo.Delete(conductor.ConductorID)
+        return err
+    }
 
 	// Generate and send verification code
 	return s.sendVerificationCode(conductor)
@@ -87,7 +97,7 @@ func (s *ConductorService) sendVerificationCode(conductor *models.Conductor) err
 
 	// Store code in Redis with expiration
 	err = s.cache.Set(context.Background(), 
-		fmt.Sprintf("conductor_verification:%d", conductor.ID),
+		fmt.Sprintf("conductor_verification:%d", conductor.ConductorID),
 		code,
 		15*time.Minute).Err()
 	if err != nil {
@@ -124,4 +134,27 @@ func (s *ConductorService) GetByID(conductorID uint) (*models.Conductor, error) 
         return nil, err
     }
     return conductor, nil
+}
+
+func (s *ConductorService) UpdateConductor(conductorID uint, req *models.ConductorUpdateRequest) error {
+    conductor, err := s.conductorRepo.GetByID(conductorID)
+    if err != nil {
+        return err
+    }
+
+    conductor.Name = req.Name
+    conductor.Description = req.Description
+    conductor.ContactEmail = req.ContactEmail
+    conductor.ContactPhone = req.ContactPhone
+    conductor.Address = req.Address
+
+    return s.conductorRepo.Update(conductor)
+}
+
+func (s *ConductorService) DeleteConductor(conductorID uint) error {
+    return s.conductorRepo.Delete(conductorID)
+}
+
+func (s *ConductorService) ListConductors(page, limit int) ([]models.Conductor, int64, error) {
+    return s.conductorRepo.List(page, limit)
 }

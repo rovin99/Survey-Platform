@@ -64,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initAuth();
   }, []);
-  // Add to AuthProvider
+  
 useEffect(() => {
     let refreshInterval: NodeJS.Timeout;
   

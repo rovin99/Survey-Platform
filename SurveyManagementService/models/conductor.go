@@ -12,7 +12,7 @@ const (
 )
 
 type Conductor struct {
-	ID            uint         `json:"id" gorm:"primaryKey"`
+	ConductorID   uint         `json:"id" gorm:"primaryKey"`
 	UserID        uint         `json:"user_id" gorm:"unique"`
 	Name          string       `json:"name"`
 	Type          ConductorType `json:"type" gorm:"type:varchar(20)"`
@@ -39,3 +39,10 @@ type ConductorRegistrationRequest struct {
 	OfficialEmail string        `json:"official_email"`
 }
 
+type ConductorUpdateRequest struct {
+	Name          string        `json:"name"`
+	Description   string        `json:"description"`
+	ContactEmail  string        `json:"contact_email"`
+	ContactPhone  string        `json:"contact_phone"`
+	Address       string        `json:"address"`
+}

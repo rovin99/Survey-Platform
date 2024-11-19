@@ -1,3 +1,4 @@
+
 // src/services/auth.service.ts
 
 interface ApiResponse<T> {
@@ -25,8 +26,6 @@ interface LoginRequest {
 }
 
 interface AuthResponse {
-  // user: UserResponse;
-  // accessToken: string;
   token: string;
 }
 
@@ -37,7 +36,7 @@ interface UserResponse {
   roles: string[];
 }
 
-const API_URL = "http://localhost:5001/api/auth";
+const API_URL = "http://localhost:8080/api/auth";
 
 export class AuthError extends Error {
   constructor(
@@ -53,26 +52,19 @@ export class AuthError extends Error {
 
 class AuthService {
   private accessToken: string | null = null;
+  private currentUser: UserResponse | null = null;
 
   constructor() {
-    // Initialize token from localStorage if available
-    if (typeof window !== 'undefined') {
-      this.accessToken = localStorage.getItem('access_token');
-    }
+    // Initialize from secure HTTP-only cookie only
+    // Token handling is now managed server-side
   }
 
   private setAccessToken(token: string) {
     this.accessToken = token;
-    console.log(token);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('access_token', token);
-    }
+    // Set auth cookie server-side instead of managing in localStorage
   }
 
   getAccessToken(): string | null {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('access_token');
-    }
     return this.accessToken;
   }
 
@@ -99,11 +91,9 @@ class AuthService {
     }
 
     this.setAccessToken(result.data.token);
-    // localStorage.setItem('user_data', JSON.stringify(result.data.user));
     return result;
   }
 
-  
   async login(data: LoginRequest): Promise<ApiResponse<AuthResponse>> {
     const response = await fetch(`${API_URL}/login`, {
       method: 'POST',
@@ -126,28 +116,23 @@ class AuthService {
       );
     }
   
-    // Store the token
     if (result.data.token) {
       this.setAccessToken(result.data.token);
-      
-      if (typeof window !== 'undefined') {
-        // Parse the JWT to get user data
-        const userData = this.parseJwt(result.data.token);
-        localStorage.setItem('user_data', JSON.stringify({
+      // Parse JWT only for immediate use, don't store in localStorage
+      const userData = this.parseJwt(result.data.token);
+      if (userData) {
+        this.currentUser = {
           userId: userData.sub,
           email: userData.email,
+          username: userData.username,
           roles: [userData['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']],
-        }));
-        
-        // Set auth cookie
-        document.cookie = `auth_token=${result.data.token}; path=/; max-age=86400; samesite=strict`;
+        };
       }
     }
   
     return result;
   }
   
-  // Add this helper method to parse JWT
   private parseJwt(token: string) {
     try {
       return JSON.parse(atob(token.split('.')[1]));
@@ -155,29 +140,24 @@ class AuthService {
       return null;
     }
   }
+
   async isAuthenticated(): Promise<boolean> {
     try {
-      const token = this.getAccessToken();
-      if (!token) {
-        return false;
-      }
-
       const response = await fetch(`${API_URL}/verify`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${this.accessToken}`
         },
         credentials: 'include',
       });
 
       if (!response.ok) {
-        // Try to refresh token
         try {
           await this.refreshToken();
           return true;
         } catch {
-          this.logout(); // Clear invalid tokens
+          this.logout();
           return false;
         }
       }
@@ -191,20 +171,7 @@ class AuthService {
   }
 
   getCurrentUser(): UserResponse | null {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    
-    const userData = localStorage.getItem('user_data');
-    if (!userData) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(userData);
-    } catch {
-      return null;
-    }
+    return this.currentUser;
   }
 
   async logout(): Promise<void> {
@@ -214,19 +181,14 @@ class AuthService {
         credentials: 'include',
         headers: {
           'Accept': 'application/json',
-          'Authorization': `Bearer ${this.getAccessToken()}`
+          'Authorization': `Bearer ${this.accessToken}`
         },
       });
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      // Always clear local storage and cookies
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('user_data');
-        document.cookie = 'auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-      }
       this.accessToken = null;
+      this.currentUser = null;
     }
   }
 
@@ -253,114 +215,13 @@ class AuthService {
     this.setAccessToken(result.data);
   }
 
-  async forgotPassword(email: string): Promise<ApiResponse<null>> {
-    const response = await fetch(`${API_URL}/forgot-password`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ email }),
-    });
-
-    const result: ApiResponse<null> = await response.json();
-
-    if (!result.success) {
-      throw new AuthError(
-        result.error?.message || 'Forgot password failed',
-        result.error?.code || 'UNKNOWN_ERROR',
-        result.error?.details,
-        result.statusCode
-      );
-    }
-
-    return result;
-  }
-
-  async resetPassword(token: string, password: string): Promise<ApiResponse<null>> {
-    const response = await fetch(`${API_URL}/reset-password`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ token, password }),
-    });
-
-    const result: ApiResponse<null> = await response.json();
-
-    if (!result.success) {
-      throw new AuthError(
-        result.error?.message || 'Reset password failed',
-        result.error?.code || 'UNKNOWN_ERROR',
-        result.error?.details,
-        result.statusCode
-      );
-    }
-
-    return result;
-  }
-
-  async verifyEmail(token: string): Promise<ApiResponse<null>> {
-    const response = await fetch(`${API_URL}/verify-email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ token }),
-    });
-
-    const result: ApiResponse<null> = await response.json();
-
-    if (!result.success) {
-      throw new AuthError(
-        result.error?.message || 'Email verification failed',
-        result.error?.code || 'UNKNOWN_ERROR',
-        result.error?.details,
-        result.statusCode
-      );
-    }
-
-    return result;
-  }
-
-  async changePassword(oldPassword: string, newPassword: string): Promise<ApiResponse<null>> {
-    const response = await fetch(`${API_URL}/change-password`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${this.getAccessToken()}`
-      },
-      credentials: 'include',
-      body: JSON.stringify({ oldPassword, newPassword }),
-    });
-
-    const result: ApiResponse<null> = await response.json();
-
-    if (!result.success) {
-      throw new AuthError(
-        result.error?.message || 'Change password failed',
-        result.error?.code || 'UNKNOWN_ERROR',
-        result.error?.details,
-        result.statusCode
-      );
-    }
-
-    return result;
-  }
-
   async updateProfile(data: Partial<UserResponse>): Promise<ApiResponse<UserResponse>> {
     const response = await fetch(`${API_URL}/profile`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Authorization': `Bearer ${this.getAccessToken()}`
+        'Authorization': `Bearer ${this.accessToken}`
       },
       credentials: 'include',
       body: JSON.stringify(data),
@@ -378,15 +239,12 @@ class AuthService {
     }
 
     if (result.data) {
-      localStorage.setItem('user_data', JSON.stringify(result.data));
+      this.currentUser = result.data;
     }
 
     return result;
   }
-  
 }
-
-
 
 export const authService = new AuthService();
 

@@ -117,6 +117,7 @@ func RequireAuth() fiber.Handler {
 
         // Set the userID in context
         c.Locals("userID", claims.UserID)
+        
         return c.Next()
     }
 }

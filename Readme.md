@@ -1,10 +1,5 @@
 # Survey Platform 
 
-## Microservices
-
-### Auth Service
-
-
 
 ## Functional Requirements
 

@@ -301,27 +301,22 @@ The API will be available at `http://localhost:5000`
 - Docker Compose (optional, for multi-container deployments)
 
 #### Using Docker
-
-1. **Build the Docker Image**
-```bash
-docker build -t auth-service .
-```
-
-2. **Run the Container**
+1. **Build the Container**
 ```bash
 docker run -d \
   --name auth-service \
-  -p 5000:5000 \
-  -e DB_CONNECTION_STRING="Server=host.docker.internal;Database=AuthDB;User Id=sa;Password=YourPassword;TrustServerCertificate=True" \
-  -e JWT_KEY="your_secure_jwt_key_here" \
-  -e JWT_ISSUER="your_issuer" \
-  -e JWT_AUDIENCE="your_audience" \
-  -e JWT_DURATION_MINUTES="60" \
-  auth-service
+  -p 5001:5000 \
+  --env-file .env \
+  --add-host=host.docker.internal:host-gateway \
+  auth-service:latest
 ```
 
+2. **Run the Docker Image**
+```bash
+docker start auth-service
+```
 
-2. **Test Registration Endpoint**
+3. **Test Registration Endpoint**
 ```bash
 curl -X POST http://localhost:5000/api/Auth/register \
   -H "Content-Type: application/json" \

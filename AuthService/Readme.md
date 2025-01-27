@@ -264,17 +264,12 @@ cd AuthService
 Create a `.env` file in the root directory:
 ```env
 # Database Configuration
-DB_CONNECTION_STRING=Server=localhost;Database=AuthDB;User Id=sa;Password=YourPassword;TrustServerCertificate=True
+CONNECTION_STRING="Host=localhost;Port=5432;Database=SurveyDb;Username=postgres;Password="
 
-# JWT Configuration
-JWT_KEY=your_secure_jwt_key_here
-JWT_ISSUER=your_issuer
-JWT_AUDIENCE=your_audience
-JWT_DURATION_MINUTES=60
-
-# App Configuration
-ASPNETCORE_ENVIRONMENT=Development
-ASPNETCORE_URLS=http://localhost:5000
+JWT_KEY="ThisIsASecretKeyWithAtLeast128Bits"
+JWT_ISSUER="AuthService"
+JWT_AUDIENCE="SurveyApp"
+JWT_DURATION="60"
 ```
 
 3. **Restore Dependencies**
@@ -292,7 +287,7 @@ dotnet ef database update
 dotnet run
 ```
 
-The API will be available at `http://localhost:5000`
+The API will be available at `http://localhost:5171`
 
 ### Docker Deployment
 

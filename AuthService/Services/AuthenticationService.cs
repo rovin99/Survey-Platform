@@ -15,7 +15,7 @@ namespace AuthService.Services
         private readonly IRoleRepository _roleRepository;
         private readonly IConfiguration _configuration;
         private readonly IHttpContextAccessor _httpContextAccessor;
-        private readonly IDistributedCache _cache;
+        // private readonly IDistributedCache _cache;
 
     public AuthenticationService(
         IUserRepository userRepository, 

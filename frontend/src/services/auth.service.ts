@@ -36,7 +36,7 @@ interface UserResponse {
   roles: string[];
 }
 
-const API_URL = "http://localhost:8080/api/auth";
+const API_URL = "http://localhost:5171/api/Auth";
 
 export class AuthError extends Error {
   constructor(

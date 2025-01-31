@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
-namespace AuthService.Models 
+namespace AuthService.Models
 {
     public class User
     {
@@ -21,12 +21,17 @@ namespace AuthService.Models
         [Required]
         [JsonIgnore]
         public string PasswordHash { get; set; }
-        // public string RefreshToken { get; set; }
-        // public DateTime RefreshTokenExpiryTime { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<UserRole> UserRoles { get; set; }
+
+        // Navigation properties
+        [JsonIgnore]
+        public Conductor Conductor { get; set; }
+
+        [JsonIgnore]
+        public Participant Participant { get; set; }
     }
 }

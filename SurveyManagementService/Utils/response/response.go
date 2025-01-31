@@ -24,7 +24,7 @@ func Success(c *fiber.Ctx, data interface{}, message string, statusCode ...int) 
 func Error(c *fiber.Ctx, message string, errorCode string, statusCode int, details interface{}) error {
 	return c.Status(statusCode).JSON(ApiResponse{
 		Success:    false,
-		Message:    message,
+		
 		StatusCode: statusCode,
 		Error: &ErrorDetail{
 			Message: message,

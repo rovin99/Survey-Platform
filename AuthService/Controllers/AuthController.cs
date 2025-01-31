@@ -138,20 +138,12 @@ namespace AuthService.Controllers
         }
 
         // [Authorize(Roles = "Admin")]
-        [HttpPost("users/{userId}/roles")]
-        public async Task<ActionResult<ApiResponse<object>>> AddUserRole(int userId, [FromBody] UserRoleUpdateModel model)
+        [HttpPost("users/roles")]
+        public async Task<ActionResult<ApiResponse<object>>> AddUserRole([FromBody] UserRoleUpdateModel model)
         {
-            if (userId != model.UserId)
-            {
-                return BadRequest(ResponseUtil.Error<object>(
-                    "User ID mismatch",
-                    "ID_MISMATCH"
-                ));
-            }
-
             try
             {
-                await _authService.AddUserRoleAsync(userId, model.RoleName);
+                await _authService.AddUserRoleAsync(model.UserId, model.RoleName);
                 return Ok(ResponseUtil.Success<object>(
                     null,
                     $"Role '{model.RoleName}' added to user successfully"
@@ -167,21 +159,14 @@ namespace AuthService.Controllers
             }
         }
 
-        [Authorize(Roles = "Admin")]
-        [HttpDelete("users/{userId}/roles")]
-        public async Task<ActionResult<ApiResponse<object>>> RemoveUserRole(int userId, [FromBody] UserRoleUpdateModel model)
+        // [Authorize(Roles = "Admin")]
+        [HttpDelete("users/roles")]
+        public async Task<ActionResult<ApiResponse<object>>> RemoveUserRole([FromBody] UserRoleUpdateModel model)
         {
-            if (userId != model.UserId)
-            {
-                return BadRequest(ResponseUtil.Error<object>(
-                    "User ID mismatch",
-                    "ID_MISMATCH"
-                ));
-            }
-
+            
             try
             {
-                await _authService.RemoveUserRoleAsync(userId, model.RoleName);
+                await _authService.RemoveUserRoleAsync(model.UserId, model.RoleName);
                 return Ok(ResponseUtil.Success<object>(
                     null,
                     $"Role '{model.RoleName}' removed from user successfully"
@@ -245,26 +230,7 @@ namespace AuthService.Controllers
     ));
 }
 
-        // [HttpPost("refresh-token")]
-        // public async Task<ActionResult<ApiResponse<string>>> RefreshToken()
-        // {
-        //     try
-        //     {
-        //         var newAccessToken = await _authService.RefreshTokenAsync();
-        //         return Ok(ResponseUtil.Success(
-        //             newAccessToken,
-        //             "Token refreshed successfully"
-        //         ));
-        //     }
-        //     catch (Exception ex)
-        //     {
-        //         return Unauthorized(ResponseUtil.Error<string>(
-        //             "Failed to refresh token",
-        //             "REFRESH_TOKEN_ERROR",
-        //             statusCode: (int)HttpStatusCode.Unauthorized
-        //         ));
-        //     }
-        // }
+       
         [HttpPost("refresh-token")]
 public async Task<ActionResult<ApiResponse<string>>> RefreshToken()
 {

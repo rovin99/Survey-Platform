@@ -1,10 +1,13 @@
 package service
+
 import (
-    "log"
-    "net/smtp"
-	"github.com/joho/godotenv"
-	"os"
 	"fmt"
+	"log"
+	"net/smtp"
+	"os"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/joho/godotenv"
 )
 type EmailService struct {
 	
@@ -44,10 +47,12 @@ func (s *EmailService) SendVerificationEmail(email, code string) error {
 	auth := smtp.PlainAuth("", s.Username, s.Password, s.SMTPServer)
 
 	// Send the email
-	err := smtp.SendMail(fmt.Sprintf("%s:%s", s.SMTPServer, s.Port), auth, from, []string{to}, []byte(message))
-	if err != nil {
-		return fmt.Errorf("failed to send verification email: %w", err)
+	
+	if err := smtp.SendMail(fmt.Sprintf("%s:%s", s.SMTPServer, s.Port), auth, from, []string{to}, []byte(message)); err != nil {
+		log.Printf("SMTP Error: %v", err)
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
+	
 
 	return nil
 }

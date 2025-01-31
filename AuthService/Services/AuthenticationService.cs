@@ -15,8 +15,7 @@ namespace AuthService.Services
         private readonly IRoleRepository _roleRepository;
         private readonly IConfiguration _configuration;
         private readonly IHttpContextAccessor _httpContextAccessor;
-        private readonly IDistributedCache _cache;
-
+        
     public AuthenticationService(
         IUserRepository userRepository, 
         IRoleRepository roleRepository, 
@@ -227,11 +226,13 @@ namespace AuthService.Services
         public async Task AddUserRoleAsync(int userId, string roleName)
         {
             var role = await _roleRepository.GetByNameAsync(roleName);
+            // print role and useerID received
+            Console.WriteLine($"Role '{role}' not found.");
+            Console.WriteLine(userId);
             if (role == null)
             {
                 throw new Exception($"Role '{roleName}' not found.");
             }
-
             await _userRepository.AddUserRoleAsync(userId, role.RoleId);
         }
 

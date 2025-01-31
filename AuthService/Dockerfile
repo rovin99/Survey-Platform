@@ -20,7 +20,7 @@ COPY .env .
 RUN apt-get update && apt-get install -y curl
 RUN curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin -Channel Current
 
-ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_URLS=http://+:5001
 ENV ASPNETCORE_ENVIRONMENT=Development
 
 EXPOSE 5000

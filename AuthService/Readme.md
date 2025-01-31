@@ -270,8 +270,6 @@ JWT_KEY="ThisIsASecretKeyWithAtLeast128Bits"
 JWT_ISSUER="AuthService"
 JWT_AUDIENCE="SurveyApp"
 JWT_DURATION="60"
-
-
 ```
 
 3. **Restore Dependencies**
@@ -298,13 +296,7 @@ The API will be available at `http://localhost:5171`
 - Docker Compose (optional, for multi-container deployments)
 
 #### Using Docker
-
-1. **Build the Docker Image**
-```bash
-docker build -t auth-service .
-```
-
-2. **Run the Container**
+1. **Build the Container**
 ```bash
 docker run -d \
   --name auth-service \
@@ -314,8 +306,12 @@ docker run -d \
   auth-service:latest
 ```
 
+2. **Run the Docker Image**
+```bash
+docker start auth-service
+```
 
-2. **Test Registration Endpoint**
+3. **Test Registration Endpoint**
 ```bash
 curl -X POST http://localhost:5001/api/Auth/register \
   -H "Content-Type: application/json" \
@@ -343,5 +339,119 @@ dotnet ef migrations add MigrationName
 
 # Remove last migration
 dotnet ef migrations remove
+```
+
+# Authentication Service Kubernetes Deployment
+
+This guide explains how to deploy the Authentication Service on a Kubernetes cluster using deployment and service configurations.
+
+## Prerequisites
+
+- Kubernetes cluster is set up and running
+- `kubectl` CLI tool is installed and configured to connect to your cluster
+
+## Deployment Steps
+
+### 1. Configuration Files
+
+Create a `deployment.yaml` file with the following configuration:
+
+```yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+        - name: auth-service
+          image: rovin123/auth-service:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: ASPNETCORE_URLS
+              value: http://*:80
+  selector:
+    matchLabels:
+      app: auth-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 32001
+  selector:
+    app: auth-service
+```
+
+### 2. Deploy to Cluster
+
+Apply the configuration to your cluster:
+
+```bash
+kubectl apply -f deployment.yaml
+```
+
+### 3. Verify Deployment
+
+Check the status of your deployment:
+
+```bash
+# Verify pods are running
+kubectl get pods
+
+# Verify service is created
+kubectl get services
+```
+
+### 4. Access the Service
+
+The service will be accessible at:
+```
+http://<NODE_IP>:32001
+```
+Replace `<NODE_IP>` with your Kubernetes cluster node's IP address.
+
+## Common Kubernetes Commands
+
+Here are some useful commands for managing and troubleshooting your deployment:
+
+### Deployment Management
+```bash
+# List all deployments
+kubectl get deployments
+
+# List all pods
+kubectl get pods
+
+# List all services
+kubectl get services
+```
+
+### Troubleshooting
+```bash
+# Get detailed information about a pod
+kubectl describe pod <POD_NAME>
+
+# View pod logs
+kubectl logs <POD_NAME>
+```
+
+### Cleanup
+```bash
+# Remove the deployment
+kubectl delete deployment auth-service
 ```
 

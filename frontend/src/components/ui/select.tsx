@@ -1,27 +1,17 @@
 import * as React from "react";
 
-import * as SelectPrimitive from "@radix-ui/react-select"; //SelectPrimitive is an object from radix that contains multiple components related to a <select> dropdown.
+import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// SelectPrimitive.Root → The main wrapper component for the select dropdown.
-// SelectPrimitive.Trigger → The button that toggles the dropdown.
-// SelectPrimitive.Content → The dropdown container (the list of options).
-// SelectPrimitive.Item → An individual option inside the dropdown.
-// SelectPrimitive.Viewport → A wrapper inside the dropdown for layout optimizations.
-// SelectPrimitive.Portal → Renders the dropdown outside of normal DOM flow.
-// SelectPrimitive.ItemText → The text content of an item.
+const Select = SelectPrimitive.Root; 
 
-const Select = SelectPrimitive.Root; //main container for the select component
-
-//defining the props
 interface SelectTriggerProps extends React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> {
   className?: string;
   children?: React.ReactNode;
 }
 
 // to open the dropdown
-// react.forwardRef is used to pass the ref to the underlying button element,
 const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerProps>(
   ({ className, children, ...props }, ref) => (
   <SelectPrimitive.Trigger
@@ -39,11 +29,7 @@ const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerProps>(
 SelectTrigger.displayName = SelectPrimitive.Trigger.displayName; //same name to the component as radix element for consistency
 
 // dropdown container
-// forwardRef to pass the ref to the underlying <div> (SelectPrimitive.Content)
-// ensures external components can access the dropdown via the ref!
 const SelectContent = React.forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>>(({ className, children, ...props }, ref) => (
-  // SelectPrimitive.Portal moves the dropdown menu to a higher level in the DOM
-  // this prevents clipping issues inside overflow: hidden or position: relative containers
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}

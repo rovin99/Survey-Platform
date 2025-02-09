@@ -47,9 +47,9 @@ export default function Survey() {
   const handleReturn = () => setCurrentIndex(-1);
   
    // Survey metadata
-   const surveyTitle = "Customer Satisfaction Survey";
-   const surveyDescription = "Thank you for taking the time to complete our survey. Your feedback helps us improve our services. Please answer the questions honestly.";
-   const surveyConductedBy = "XYZ Company";
+  const surveyTitle = "Customer Satisfaction Survey";
+  const surveyDescription = "Thank you for taking the time to complete our survey. Your feedback helps us improve our services. Please answer the questions honestly.";
+  const surveyConductedBy = "XYZ Company";
 
   // Track progress using local storage
   useEffect(() => {

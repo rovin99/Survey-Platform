@@ -1,198 +1,135 @@
 package handler
 
 import (
-	
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/service"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"encoding/json"
+
 	"github.com/gofiber/fiber/v2"
-	
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/service"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
 )
+
 type SurveyHandler struct {
-	surveyService *service.SurveyService
+	surveyService service.SurveyService
 }
 
-func NewSurveyHandler(ss *service.SurveyService) *SurveyHandler {
-	return &SurveyHandler{surveyService: ss}
+func NewSurveyHandler(surveyService service.SurveyService) *SurveyHandler {
+	return &SurveyHandler{
+		surveyService: surveyService,
+	}
+}
+
+type CreateSurveyRequest struct {
+	Title             string `json:"title"`
+	Description       string `json:"description"`
+	IsSelfRecruitment bool   `json:"is_self_recruitment"`
+	ConductorID       uint   `json:"conductor_id"`
+}
+
+type SaveSectionRequest struct {
+	Questions      []models.Question        `json:"questions"`
+	MediaFiles     []models.SurveyMediaFile `json:"media_files"`
+	BranchingLogic []models.BranchingRule   `json:"branching_logic"`
 }
 
 func (h *SurveyHandler) CreateSurvey(c *fiber.Ctx) error {
-	var survey models.Survey
-	if err := c.BodyParser(&survey); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
+	var req CreateSurveyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return response.BadRequest(c, "Invalid request body")
 	}
 
-	if err := h.surveyService.CreateSurvey(&survey); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+	survey := &models.Survey{
+		Title:             req.Title,
+		Description:       req.Description,
+		IsSelfRecruitment: req.IsSelfRecruitment,
+		ConductorID:       req.ConductorID,
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(survey)
+	if err := h.surveyService.CreateSurvey(c.Context(), survey); err != nil {
+		return response.InternalServerError(c, "Failed to create survey")
+	}
+
+	return response.Success(c, survey, "Survey created successfully", fiber.StatusCreated)
+}
+
+func (h *SurveyHandler) SaveSection(c *fiber.Ctx) error {
+	surveyID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid survey ID")
+	}
+
+	var req SaveSectionRequest
+	if err := c.BodyParser(&req); err != nil {
+		return response.BadRequest(c, "Invalid request body")
+	}
+
+	err = h.surveyService.SaveSection(c.Context(), uint(surveyID), req.Questions, req.MediaFiles, req.BranchingLogic)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to save section")
+	}
+
+	return response.Success(c, nil, "Section saved successfully")
+}
+
+func (h *SurveyHandler) SaveDraft(c *fiber.Ctx) error {
+	surveyID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid survey ID")
+	}
+
+	var draftContent json.RawMessage
+	if err := c.BodyParser(&draftContent); err != nil {
+		return response.BadRequest(c, "Invalid request body")
+	}
+
+	lastEditedQuestion := uint(c.QueryInt("last_edited_question", 0))
+
+	err = h.surveyService.SaveDraft(c.Context(), uint(surveyID), draftContent, lastEditedQuestion)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to save draft")
+	}
+
+	return response.Success(c, nil, "Draft saved successfully")
+}
+
+func (h *SurveyHandler) PublishSurvey(c *fiber.Ctx) error {
+	surveyID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid survey ID")
+	}
+
+	err = h.surveyService.PublishSurvey(c.Context(), uint(surveyID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to publish survey")
+	}
+
+	return response.Success(c, nil, "Survey published successfully")
+}
+
+func (h *SurveyHandler) GetProgress(c *fiber.Ctx) error {
+	surveyID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid survey ID")
+	}
+
+	progress, err := h.surveyService.GetProgress(c.Context(), uint(surveyID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get progress")
+	}
+
+	return response.Success(c, progress, "Progress retrieved successfully")
 }
 
 func (h *SurveyHandler) GetSurvey(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
+	surveyID, err := c.ParamsInt("id")
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid survey ID",
-		})
+		return response.BadRequest(c, "Invalid survey ID")
 	}
 
-	survey, err := h.surveyService.GetSurvey(uint(id))
+	survey, err := h.surveyService.GetSurvey(c.Context(), uint(surveyID))
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Survey not found",
-		})
+		return response.InternalServerError(c, "Failed to get survey")
 	}
 
-	return c.JSON(survey)
-}
-func (h *SurveyHandler) ListSurveys(c *fiber.Ctx) error {
-	surveys, err := h.surveyService.ListSurveys()
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.JSON(surveys)
-}
-
-func (h *SurveyHandler) UpdateSurvey(c *fiber.Ctx) error {
-
-	var survey models.Survey
-	if err := c.BodyParser(&survey); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-	}
-
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid survey ID",
-		})
-	}
-
-	survey.SurveyID = uint(id)
-
-	if err := h.surveyService.UpdateSurvey(&survey); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.JSON(survey)
-}
-
-func (h *SurveyHandler) DeleteSurvey(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid survey ID",
-		})
-	}
-
-	if err := h.surveyService.DeleteSurvey(uint(id)); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.SendStatus(fiber.StatusNoContent)
-}
-
-func (h *SurveyHandler) AddQuestion(c *fiber.Ctx) error {
-	var question models.Question
-	if err := c.BodyParser(&question); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-	}
-
-	surveyID, err := c.ParamsInt("surveyID")
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid survey ID",
-		})
-	}
-
-	question.SurveyID = uint(surveyID)
-
-	if err := h.surveyService.AddQuestion(&question); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(fiber.StatusCreated).JSON(question)
-}
-
-func (h *SurveyHandler) GetQuestion(c *fiber.Ctx) error {
-	questionID, err := c.ParamsInt("questionID")
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid question ID",
-		})
-	}
-
-	question, err := h.surveyService.GetQuestion(uint(questionID))
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Question not found",
-		})
-	}
-
-	return c.JSON(question)
-}
-
-func (h *SurveyHandler) UpdateQuestion(c *fiber.Ctx) {
-
-	var question models.Question
-	if err := c.BodyParser(&question); err != nil {
-		c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-		return
-	}
-
-	questionID, err := c.ParamsInt("questionID")
-	if err != nil {
-		c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid question ID",
-		})
-		return
-	}
-
-	question.QuestionID = uint(questionID)
-
-	if err := h.surveyService.UpdateQuestion(&question); err != nil {
-		c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	c.JSON(question)
-}
-
-func (h *SurveyHandler) DeleteQuestion(c *fiber.Ctx) {
-	questionID, err := c.ParamsInt("questionID")
-	if err != nil {
-		c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid question ID",
-		})
-		return
-	}
-
-	if err := h.surveyService.DeleteQuestion(uint(questionID)); err != nil {
-		c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	c.SendStatus(fiber.StatusNoContent)
+	return response.Success(c, survey, "Survey retrieved successfully")
 }

@@ -10,6 +10,7 @@ type Survey struct {
 	Title            string             `json:"title"`
 	Description      string             `json:"description"`
 	IsSelfRecruitment bool              `json:"is_self_recruitment"`
+	Status            string             `json:"status"`
 	Questions        []Question         `json:"questions,omitempty" gorm:"foreignKey:SurveyID"`
 	Requirements     []SurveyRequirement `json:"requirements,omitempty" gorm:"foreignKey:SurveyID"`
 	CreatedAt        time.Time          `json:"created_at"`

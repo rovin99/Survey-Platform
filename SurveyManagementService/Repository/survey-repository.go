@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
-	"gorm.io/gorm"
+
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	
+	"gorm.io/gorm"
 )
 
 type SurveyRepository interface {
@@ -13,14 +13,23 @@ type SurveyRepository interface {
 	Update(ctx context.Context, survey *models.Survey) error
 	Delete(ctx context.Context, id uint) error
 	List(ctx context.Context, conductorID uint) ([]models.Survey, error)
+	Transaction(ctx context.Context, fn func(tx *gorm.DB) error) error 
 }
-
+type Transaction interface {
+    Create(value interface{}) error
+    Save(value interface{}) error
+    Delete(value interface{}) error
+}
 type surveyRepository struct {
 	db *gorm.DB
 }
 
 func NewSurveyRepository(db *gorm.DB) SurveyRepository {
 	return &surveyRepository{db: db}
+}
+
+func (r *surveyRepository) Transaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	return r.db.WithContext(ctx).Transaction(fn)
 }
 
 func (r *surveyRepository) Create(ctx context.Context, survey *models.Survey) error {

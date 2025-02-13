@@ -56,7 +56,7 @@
 // }
 
 
-package middleware
+package middlewares
 
 import (
 	"time"

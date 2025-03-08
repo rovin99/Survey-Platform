@@ -260,13 +260,13 @@ let isRefreshing = false;
 let failedQueue: any[] = [];
 
 const processQueue = (error: Error | null, token: string | null = null) => {
-	failedQueue.forEach((prom) => {
+	for (const prom of failedQueue) {
 		if (error) {
 			prom.reject(error);
 		} else {
 			prom.resolve(token);
 		}
-	});
+	}
 
 	failedQueue = [];
 };
@@ -295,7 +295,7 @@ axios.interceptors.response.use(
 					failedQueue.push({ resolve, reject });
 				})
 					.then((token) => {
-						originalRequest.headers["Authorization"] = `Bearer ${token}`;
+						originalRequest.headers.Authorization = `Bearer ${token}`;
 						return axios(originalRequest);
 					})
 					.catch((err) => Promise.reject(err));
@@ -308,7 +308,7 @@ axios.interceptors.response.use(
 				await authService.refreshToken();
 				const newToken = authService.getAccessToken();
 				processQueue(null, newToken);
-				originalRequest.headers["Authorization"] = `Bearer ${newToken}`;
+				originalRequest.headers.Authorization = `Bearer ${newToken}`;
 				return axios(originalRequest);
 			} catch (error) {
 				processQueue(error as Error);

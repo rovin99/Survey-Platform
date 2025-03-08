@@ -1,36 +1,25 @@
-import type { Metadata } from "next";
-import localFont from "next/font/local";
-import "./globals.css";
-import { AuthProvider } from "@/context/AuthContext";
-
-const geistSans = localFont({
-	src: "../fonts/GeistVF.woff",
-	variable: "--font-geist-sans",
-	weight: "100 900",
-});
-const geistMono = localFont({
-	src: "../fonts/GeistMonoVF.woff",
-	variable: "--font-geist-mono",
-	weight: "100 900",
-});
+// src/app/layout.tsx
+import { ClientAuthProvider } from '@/components/ClientAuthProvider';
+import './globals.css';
+import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-	title: "Survey Pro",
-	description: "Survey Pro is a platform for creating and sharing surveys",
+  title: 'Survey Platform',
+  description: 'A modern survey platform',
 };
 
 export default function RootLayout({
-	children,
-}: Readonly<{
-	children: React.ReactNode;
-}>) {
-	return (
-		<html lang="en">
-			<body
-				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-			>
-				<AuthProvider>{children}</AuthProvider>
-			</body>
-		</html>
-	);
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <ClientAuthProvider>
+          {children}
+        </ClientAuthProvider>
+      </body>
+    </html>
+  );
 }

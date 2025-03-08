@@ -1,15 +1,15 @@
 // app/dashboard/layout.tsx
-import { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'Dashboard | Your App',
-  description: 'Your personal dashboard',
+	title: "Dashboard | Your App",
+	description: "Your personal dashboard",
 };
 
 export default function DashboardLayout({
-  children,
+	children,
 }: {
-  children: React.ReactNode;
+	children: React.ReactNode;
 }) {
-  return children;
+	return children;
 }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
@@ -30,6 +31,12 @@ type SaveSectionRequest struct {
 	Questions      []models.Question        `json:"questions"`
 	MediaFiles     []models.SurveyMediaFile `json:"media_files"`
 	BranchingLogic []models.BranchingRule   `json:"branching_logic"`
+}
+
+type CreateDraftRequest struct {
+	SurveyID           uint               `json:"survey_id"`
+	DraftContent       models.JSONContent `json:"draft_content"`
+	LastEditedQuestion uint               `json:"last_edited_question"`
 }
 
 func (h *SurveyHandler) CreateSurvey(c *fiber.Ctx) error {
@@ -77,7 +84,7 @@ func (h *SurveyHandler) SaveDraft(c *fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid survey ID")
 	}
 
-	var draftContent json.RawMessage
+	var draftContent models.JSONContent
 	if err := c.BodyParser(&draftContent); err != nil {
 		return response.BadRequest(c, "Invalid request body")
 	}
@@ -132,4 +139,69 @@ func (h *SurveyHandler) GetSurvey(c *fiber.Ctx) error {
 	}
 
 	return response.Success(c, survey, "Survey retrieved successfully")
+}
+
+func (h *SurveyHandler) CreateDraft(c *fiber.Ctx) error {
+	var req CreateDraftRequest
+	if err := c.BodyParser(&req); err != nil {
+		return response.BadRequest(c, "Invalid request body")
+	}
+
+	// Log the request in a readable format
+	draftContentJSON, _ := json.MarshalIndent(json.RawMessage(req.DraftContent), "", "  ")
+	log.Printf("Creating draft with content: %s", string(draftContentJSON))
+
+	draft, err := h.surveyService.CreateDraft(c.Context(), req.SurveyID, req.DraftContent, req.LastEditedQuestion)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to save draft")
+	}
+
+	return response.Success(c, fiber.Map{
+		"draftId":   draft.DraftID,
+		"lastSaved": draft.LastSaved,
+	}, "Draft saved successfully", fiber.StatusCreated)
+}
+
+func (h *SurveyHandler) UpdateDraft(c *fiber.Ctx) error {
+	// Get draft ID from URL parameters
+	draftID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid draft ID")
+	}
+
+	// Parse the request body
+	var req CreateDraftRequest
+	if err := c.BodyParser(&req); err != nil {
+		return response.BadRequest(c, "Invalid request body")
+	}
+
+	// Log the request in a readable format
+	draftContentJSON, _ := json.MarshalIndent(json.RawMessage(req.DraftContent), "", "  ")
+	log.Printf("Updating draft %d with content: %s", draftID, string(draftContentJSON))
+
+	// Update the draft using service
+	draft, err := h.surveyService.UpdateDraft(c.Context(), uint(draftID), req.DraftContent, req.LastEditedQuestion)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to update draft")
+	}
+
+	// Return the updated draft
+	return response.Success(c, fiber.Map{
+		"draftId":   draft.DraftID,
+		"lastSaved": draft.LastSaved,
+	}, "Draft updated successfully")
+}
+
+func (h *SurveyHandler) GetDraft(c *fiber.Ctx) error {
+	draftID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid draft ID")
+	}
+
+	draft, err := h.surveyService.GetDraft(c.Context(), uint(draftID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get draft")
+	}
+
+	return response.Success(c, draft, "Draft retrieved successfully")
 }

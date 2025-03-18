@@ -4,19 +4,22 @@ import (
 	"encoding/json"
 	"log"
 
+	"SurveyManagementService/models"
+	"SurveyManagementService/service"
+	"SurveyManagementService/utils/response"
+
 	"github.com/gofiber/fiber/v2"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/service"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
 )
 
 type SurveyHandler struct {
-	surveyService service.SurveyService
+	surveyService   service.SurveyService
+	questionService service.QuestionTypeServiceInterface
 }
 
-func NewSurveyHandler(surveyService service.SurveyService) *SurveyHandler {
+func NewSurveyHandler(surveyService service.SurveyService, questionService service.QuestionTypeServiceInterface) *SurveyHandler {
 	return &SurveyHandler{
-		surveyService: surveyService,
+		surveyService:   surveyService,
+		questionService: questionService,
 	}
 }
 
@@ -139,6 +142,20 @@ func (h *SurveyHandler) GetSurvey(c *fiber.Ctx) error {
 	}
 
 	return response.Success(c, survey, "Survey retrieved successfully")
+}
+
+func (h *SurveyHandler) GetQuestions(c *fiber.Ctx) error {
+	surveyID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid survey ID")
+	}
+
+	questions, err := h.questionService.GetQuestions(c.Context(), uint(surveyID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get questions")
+	}
+
+	return response.Success(c, questions, "Questions retrieved successfully")
 }
 
 func (h *SurveyHandler) CreateDraft(c *fiber.Ctx) error {

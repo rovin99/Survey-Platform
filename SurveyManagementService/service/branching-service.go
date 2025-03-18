@@ -4,7 +4,7 @@ import (
     "context"
     "errors"
     
-    "github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+    "SurveyManagementService/repository"
 )
 
 

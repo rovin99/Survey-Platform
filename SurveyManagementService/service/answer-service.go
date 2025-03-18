@@ -3,8 +3,8 @@ package service
 import (
     "context"
     "errors"
-    "github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-    "github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+    "SurveyManagementService/models"
+    "SurveyManagementService/repository"
 )
 
 type AnswerService struct {

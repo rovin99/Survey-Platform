@@ -1,12 +1,18 @@
 package service
 
 import (
-    
-    "github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+    "context"
+    "SurveyManagementService/models"
+    "SurveyManagementService/repository"
 )
 
 type QuestionTypeService struct {
     questionRepo repository.QuestionRepository
+}
+
+type QuestionTypeServiceInterface interface {
+    ValidateQuestionType(questionType string) bool
+    GetQuestions(ctx context.Context, surveyID uint) ([]models.Question, error)
 }
 
 func NewQuestionTypeService(repo repository.QuestionRepository) *QuestionTypeService {
@@ -26,4 +32,7 @@ func (s *QuestionTypeService) ValidateQuestionType(questionType string) bool {
         "AUDIO":          true,
     }
     return validTypes[questionType]
+}
+func (s *QuestionTypeService) GetQuestions(ctx context.Context, surveyID uint) ([]models.Question, error) {
+    return s.questionRepo.GetBySurveyID(ctx, surveyID)
 }

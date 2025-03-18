@@ -2,8 +2,8 @@ package routes
 
 import (
 	"github.com/gofiber/fiber/v2"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/handler"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/middlewares"
+	"SurveyManagementService/handler"
+	"SurveyManagementService/middlewares"
 )
 
 func SetupSurveyRoutes(app *fiber.App, handler *handler.SurveyHandler) {
@@ -33,6 +33,10 @@ func SetupSurveyRoutes(app *fiber.App, handler *handler.SurveyHandler) {
 
 	surveyGroup.Get("/:id",
 		handler.GetSurvey,
+	)
+
+	surveyGroup.Get("/:id/questions",
+		handler.GetQuestions,
 	)
 }
 

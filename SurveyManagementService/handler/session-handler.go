@@ -2,7 +2,7 @@ package handler
 
 import (
    
-    "github.com/rovin99/Survey-Platform/SurveyManagementService/service"
+    "SurveyManagementService/service"
 )
 
 type SessionHandler struct {

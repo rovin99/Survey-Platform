@@ -63,7 +63,7 @@ import (
     "fmt"
     "github.com/gofiber/fiber/v2"
     "github.com/golang-jwt/jwt/v4"
-    "github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
+    "SurveyManagementService/utils/response"
 )
 
 // CustomClaims defines a struct for JWT claims

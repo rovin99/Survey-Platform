@@ -11,8 +11,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+	"SurveyManagementService/models"
+	"SurveyManagementService/repository"
 )
 
 type SurveyService interface {

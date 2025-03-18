@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"SurveyManagementService/models"
 	"gorm.io/gorm"
 )
 

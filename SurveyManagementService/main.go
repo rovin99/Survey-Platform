@@ -15,11 +15,11 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/handler"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/routes"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/service"
+	"SurveyManagementService/handler"
+	"SurveyManagementService/models"
+	"SurveyManagementService/repository"
+	"SurveyManagementService/routes"
+	"SurveyManagementService/service"
 )
 
 func setupDatabase() (*gorm.DB, error) {
@@ -57,16 +57,16 @@ func setupDatabase() (*gorm.DB, error) {
 	return db, nil
 }
 
-func setupRepositories(db *gorm.DB) (repository.SurveyRepository, repository.SurveyDraftRepository) {
-	return repository.NewSurveyRepository(db), repository.NewSurveyDraftRepository(db)
+func setupRepositories(db *gorm.DB) (repository.SurveyRepository, repository.SurveyDraftRepository, repository.QuestionRepository) {
+	return repository.NewSurveyRepository(db), repository.NewSurveyDraftRepository(db), repository.NewQuestionRepository(db)
 }
 
-func setupServices(surveyRepo repository.SurveyRepository, surveyDraftRepo repository.SurveyDraftRepository) service.SurveyService {
-	return service.NewSurveyService(surveyRepo, surveyDraftRepo)
+func setupServices(surveyRepo repository.SurveyRepository, surveyDraftRepo repository.SurveyDraftRepository, questionRepo repository.QuestionRepository) (service.SurveyService, service.QuestionTypeServiceInterface) {
+	return service.NewSurveyService(surveyRepo, surveyDraftRepo), service.NewQuestionTypeService(questionRepo)
 }
 
-func setupHandlers(surveyService service.SurveyService) *handler.SurveyHandler {
-	return handler.NewSurveyHandler(surveyService)
+func setupHandlers(surveyService service.SurveyService, questionService service.QuestionTypeServiceInterface) *handler.SurveyHandler {
+	return handler.NewSurveyHandler(surveyService, questionService)
 }
 
 func main() {
@@ -75,9 +75,9 @@ func main() {
 		log.Fatal("Failed to setup database:", err)
 	}
 
-	surveyRepo, surveyDraftRepo := setupRepositories(db)
-	surveyService := setupServices(surveyRepo, surveyDraftRepo)
-	surveyHandler := setupHandlers(surveyService)
+	surveyRepo, surveyDraftRepo, questionRepo := setupRepositories(db)
+	surveyService, questionService := setupServices(surveyRepo, surveyDraftRepo, questionRepo)
+	surveyHandler := setupHandlers(surveyService, questionService)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {

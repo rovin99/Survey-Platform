@@ -4,7 +4,7 @@ import (
 	"log"
 
 	"gorm.io/gorm"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"SurveyManagementService/models"
 )
 
 func MigrateSurveyTables(db *gorm.DB) {

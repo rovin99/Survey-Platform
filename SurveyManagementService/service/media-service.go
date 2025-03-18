@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/google/uuid"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"SurveyManagementService/models"
 )
 
 type MediaServiceInterface interface {

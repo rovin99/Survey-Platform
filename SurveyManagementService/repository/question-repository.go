@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 	"gorm.io/gorm"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"SurveyManagementService/models"
 )
 
 type QuestionRepository interface {

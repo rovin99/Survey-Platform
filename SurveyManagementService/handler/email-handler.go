@@ -3,7 +3,7 @@ package handler
 import (
     "github.com/gofiber/fiber/v2"
     
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
+	"SurveyManagementService/utils/response"
 	
    
 )

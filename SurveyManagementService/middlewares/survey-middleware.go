@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
+	"SurveyManagementService/models"
+	"SurveyManagementService/utils/response"
 )
 
 // ValidationError represents a structured validation error

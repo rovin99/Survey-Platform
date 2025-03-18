@@ -17,6 +17,7 @@ type SurveyDraftRepository interface {
 	Update(ctx context.Context, draft *models.SurveyDraft) (*models.SurveyDraft, error)
 	GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error)
 	ListDrafts(ctx context.Context, surveyID uint) ([]models.SurveyDraft, error)
+	DeleteAllForSurveyWithTx(ctx context.Context, tx *gorm.DB, surveyID uint) error
 }
 
 type surveyDraftRepository struct {
@@ -90,4 +91,9 @@ func (r *surveyDraftRepository) Update(ctx context.Context, draft *models.Survey
 		return nil, err
 	}
 	return draft, nil
+}
+
+// DeleteAllForSurveyWithTx deletes all drafts for a specific survey within a transaction
+func (r *surveyDraftRepository) DeleteAllForSurveyWithTx(ctx context.Context, tx *gorm.DB, surveyID uint) error {
+	return tx.WithContext(ctx).Delete(&models.SurveyDraft{}, "survey_id = ?", surveyID).Error
 }

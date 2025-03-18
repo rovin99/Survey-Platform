@@ -48,4 +48,7 @@ func SetupDraftRoutes(app *fiber.App, handler *handler.SurveyHandler) {
 
 	// Update existing draft
 	draftGroup.Put("/drafts/:id", handler.UpdateDraft)
+
+	// Publish draft to survey
+	draftGroup.Post("/drafts/:id/publish", handler.PublishDraft)
 }

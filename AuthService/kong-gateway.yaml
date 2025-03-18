@@ -1,0 +1,64 @@
+# 1. Create the Kong Namespace (unchanged)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kong
+---
+# 2. Kong Rate Limiting Plugin (unchanged)
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: rate-limiting
+  namespace: kong
+plugin: rate-limiting
+config:
+  minute: 100
+  policy: local
+---
+# 3. Kong Ingress Configuration for Knative Auth Service
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: auth-gateway
+  namespace: kong
+  annotations:
+    konghq.com/plugins: rate-limiting
+    konghq.com/strip-path: "true"
+    konghq.com/protocols: "https"
+    konghq.com/https-redirect-status-code: "301"
+spec:
+  ingressClassName: kong
+  rules:
+  - http:
+      paths:
+      - path: /api/auth
+        pathType: Prefix
+        backend:
+          service:
+            # Point to the Knative service's Kubernetes service
+            name: auth-service-00001      # Use the exact service name from your Knative deployment
+            port:
+              number: 80
+          # Alternatively, use Knative's networking to route traffic
+          # service:
+          #   name: auth-service.default.svc.cluster.local  # Fully qualified domain name
+          #   port:
+          #     number: 80
+---
+# 4. Kong Service Configuration (unchanged)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-proxy
+  namespace: kong
+spec:
+  type: LoadBalancer
+  ports:
+  - name: proxy
+    port: 443
+    targetPort: 8443
+  - name: proxy-http
+    port: 80
+    targetPort: 8000
+  selector:
+    app: kong

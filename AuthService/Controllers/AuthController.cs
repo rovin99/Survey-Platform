@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using AuthService.Models.DTOs;
 using System.ComponentModel.DataAnnotations;
 using System.Net;
+using Microsoft.AspNetCore.Http;
 
 namespace AuthService.Controllers 
 {
@@ -82,6 +83,17 @@ namespace AuthService.Controllers
         try
         {
             var (accessToken, user) = await _authService.LoginAsync(model.Username, model.Password);
+            
+            // Set access token in HTTP-only cookie
+            Response.Cookies.Append("accessToken", accessToken, new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Expires = DateTime.Now.AddMinutes(15),
+                Path = "/"
+            });
+            
             var response = new LoginResponseDTO { Token = accessToken };
             return Ok(ResponseUtil.Success(response, "Login successful"));
         }
@@ -114,7 +126,8 @@ namespace AuthService.Controllers
                 return NotFound(ResponseUtil.NotFound<UserDTO>("User not found"));
             }
 
-            return Ok(ResponseUtil.Success(UserDTO.FromUser(user)));
+            var userDto = UserDTO.FromUser(user);
+            return Ok(ResponseUtil.Success(userDto, "User profile retrieved successfully"));
         }
 
         [Authorize(Roles = "Admin")]
@@ -237,6 +250,17 @@ public async Task<ActionResult<ApiResponse<string>>> RefreshToken()
     try
     {
         var newAccessToken = await _authService.RefreshTokenAsync();
+        
+        // Set the new access token in an HTTP-only cookie
+        Response.Cookies.Append("accessToken", newAccessToken, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Expires = DateTime.Now.AddMinutes(15),
+            Path = "/"
+        });
+        
         return Ok(ResponseUtil.Success(
             new { token = newAccessToken },
             "Token refreshed successfully"
@@ -258,6 +282,25 @@ public async Task<ActionResult<ApiResponse<string>>> RefreshToken()
             try
             {
                 await _authService.LogoutAsync();
+                
+                // Clear the access token cookie
+                Response.Cookies.Delete("accessToken", new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = true,
+                    SameSite = SameSiteMode.None,
+                    Path = "/"
+                });
+                
+                // Clear the refresh token cookie
+                Response.Cookies.Delete("refreshToken", new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = true,
+                    SameSite = SameSiteMode.None,
+                    Path = "/"
+                });
+                
                 return Ok(ResponseUtil.Success<object>(
                     null,
                     "Logged out successfully"

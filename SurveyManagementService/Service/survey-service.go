@@ -25,6 +25,8 @@ type SurveyService interface {
 	GetProgress(ctx context.Context, surveyID uint) (*SurveyProgress, error)
 	GetSurvey(ctx context.Context, surveyID uint) (*models.Survey, error)
 	GetDraft(ctx context.Context, draftID uint) (*models.SurveyDraft, error)
+	PublishDraftToSurvey(ctx context.Context, draftID uint) (uint, error)
+	GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error)
 }
 
 type SurveyProgress struct {
@@ -180,4 +182,138 @@ func (s *surveyService) UpdateDraft(ctx context.Context, draftID uint, content m
 
 func (s *surveyService) GetDraft(ctx context.Context, draftID uint) (*models.SurveyDraft, error) {
 	return s.surveyDraftRepo.GetByID(ctx, draftID)
+}
+
+func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) (uint, error) {
+	// Get the draft by ID
+	draft, err := s.surveyDraftRepo.GetByID(ctx, draftID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Parse the draft content
+	var draftContent struct {
+		BasicInfo struct {
+			Title             string `json:"title"`
+			Description       string `json:"description"`
+			IsSelfRecruitment bool   `json:"is_self_recruitment"`
+			ConductorID       uint   `json:"conductor_id"`
+			Status            string `json:"status"`
+		} `json:"basicInfo"`
+		Questions []struct {
+			QuestionText   string   `json:"question_text"`
+			QuestionType   string   `json:"question_type"`
+			Mandatory      bool     `json:"mandatory"`
+			BranchingLogic string   `json:"branching_logic"`
+			Options        []string `json:"options"`
+		} `json:"questions"`
+		MediaFiles []struct {
+			QuestionID string `json:"question_id"`
+			FileURL    string `json:"file_url"`
+			FileType   string `json:"file_type"`
+		} `json:"mediaFiles"`
+	}
+
+	// Unmarshal the JSON content
+	if err := json.Unmarshal([]byte(draft.DraftContent), &draftContent); err != nil {
+		return 0, err
+	}
+
+	// Begin a transaction
+	return s.surveyRepo.TransactionWithResult(ctx, func(tx *gorm.DB) (uint, error) {
+		// Check if survey exists or create a new one
+		var survey models.Survey
+		var surveyID uint
+
+		if draft.SurveyID > 0 {
+			// Update existing survey
+			existingSurvey, err := s.surveyRepo.GetByIDWithTx(ctx, tx, draft.SurveyID)
+			if err != nil {
+				return 0, err
+			}
+
+			// Update basic info
+			existingSurvey.Title = draftContent.BasicInfo.Title
+			existingSurvey.Description = draftContent.BasicInfo.Description
+			existingSurvey.IsSelfRecruitment = draftContent.BasicInfo.IsSelfRecruitment
+			existingSurvey.Status = "PUBLISHED"
+			existingSurvey.UpdatedAt = time.Now()
+
+			if err := s.surveyRepo.UpdateWithTx(ctx, tx, existingSurvey); err != nil {
+				return 0, err
+			}
+
+			surveyID = existingSurvey.SurveyID
+
+			// Delete existing questions and media files
+			if err := s.surveyRepo.DeleteQuestionsWithTx(ctx, tx, surveyID); err != nil {
+				return 0, err
+			}
+
+			if err := s.surveyRepo.DeleteMediaFilesWithTx(ctx, tx, surveyID); err != nil {
+				return 0, err
+			}
+		} else {
+			// Create new survey
+			survey = models.Survey{
+				Title:             draftContent.BasicInfo.Title,
+				Description:       draftContent.BasicInfo.Description,
+				IsSelfRecruitment: draftContent.BasicInfo.IsSelfRecruitment,
+				ConductorID:       draftContent.BasicInfo.ConductorID,
+				Status:            "PUBLISHED",
+				CreatedAt:         time.Now(),
+				UpdatedAt:         time.Now(),
+			}
+
+			if err := s.surveyRepo.CreateWithTx(ctx, tx, &survey); err != nil {
+				return 0, err
+			}
+
+			surveyID = survey.SurveyID
+		}
+
+		// Add questions
+		for i, q := range draftContent.Questions {
+			question := models.Question{
+				SurveyID:       surveyID,
+				QuestionText:   q.QuestionText,
+				QuestionType:   q.QuestionType,
+				Mandatory:      q.Mandatory,
+				OrderIndex:     i,
+				BranchingLogic: q.BranchingLogic,
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+			}
+
+			if err := s.surveyRepo.CreateQuestionWithTx(ctx, tx, &question); err != nil {
+				return 0, err
+			}
+		}
+
+		// Add media files
+		for _, m := range draftContent.MediaFiles {
+			mediaFile := models.SurveyMediaFile{
+				SurveyID:   surveyID,
+				QuestionID: 0,
+				FileURL:    m.FileURL,
+				FileType:   m.FileType,
+				CreatedAt:  time.Now(),
+			}
+
+			if err := s.surveyRepo.CreateMediaFileWithTx(ctx, tx, &mediaFile); err != nil {
+				return 0, err
+			}
+		}
+
+		// Delete all drafts for this survey
+		if err := s.surveyDraftRepo.DeleteAllForSurveyWithTx(ctx, tx, surveyID); err != nil {
+			return 0, err
+		}
+
+		return surveyID, nil
+	})
+}
+
+func (s *surveyService) GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error) {
+	return s.surveyDraftRepo.GetLatestDraft(ctx, surveyID)
 }

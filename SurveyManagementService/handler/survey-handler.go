@@ -205,3 +205,36 @@ func (h *SurveyHandler) GetDraft(c *fiber.Ctx) error {
 
 	return response.Success(c, draft, "Draft retrieved successfully")
 }
+
+func (h *SurveyHandler) PublishDraft(c *fiber.Ctx) error {
+	// Get draft ID from URL parameters
+	draftID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid draft ID")
+	}
+
+	// Get the requested draft
+	draft, err := h.surveyService.GetDraft(c.Context(), uint(draftID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to retrieve draft: "+err.Error())
+	}
+
+	// Check if a more recent draft exists for this survey
+	latestDraft, err := h.surveyService.GetLatestDraft(c.Context(), draft.SurveyID)
+	if err == nil && latestDraft.DraftID > uint(draftID) {
+		// A more recent draft exists
+		log.Printf("More recent draft found: %d vs requested %d", latestDraft.DraftID, draftID)
+		return response.BadRequest(c, "A more recent draft exists. Please refresh and try again.")
+	}
+
+	// Publish the draft using service
+	surveyID, err := h.surveyService.PublishDraftToSurvey(c.Context(), uint(draftID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to publish survey: "+err.Error())
+	}
+
+	// Return success with the survey ID
+	return response.Success(c, fiber.Map{
+		"surveyId": surveyID,
+	}, "Survey published successfully")
+}

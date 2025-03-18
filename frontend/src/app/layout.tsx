@@ -1,5 +1,6 @@
 // src/app/layout.tsx
 import { ClientAuthProvider } from '@/components/ClientAuthProvider';
+
 import './globals.css';
 import type { Metadata } from 'next';
 

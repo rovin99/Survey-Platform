@@ -42,6 +42,7 @@ func setupDatabase() (*gorm.DB, error) {
 	err = db.AutoMigrate(
 		&models.Survey{},
 		&models.Question{},
+		&models.Option{},
 		&models.SurveyRequirement{},
 		&models.Answer{},
 		&models.SurveySession{},
@@ -136,7 +137,7 @@ func main() {
 	app.Use(logger.New())
 	app.Use(recover.New())
 
-	routes.SetupSurveyRoutes(app, surveyHandler)
+	// routes.SetupSurveyRoutes(app, surveyHandler)
 	routes.SetupDraftRoutes(app, surveyHandler)
 
 	port := os.Getenv("PORT")

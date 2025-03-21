@@ -23,12 +23,21 @@ type Question struct {
 	SurveyID       uint      `json:"survey_id"`
 	QuestionText   string    `json:"question_text"`
 	QuestionType   string    `json:"question_type"`   // Enum: Text, MultipleChoice, etc.
+	Options        []Option  `json:"options,omitempty" gorm:"foreignKey:QuestionID"` // For multiple-choice questions
+	CorrectAnswers string    `json:"correct_answers"` // Comma-separated IDs or JSON string for multiple correct answers
 	BranchingLogic string    `json:"branching_logic"` // JSON string or nullable field
 	Mandatory      bool      `json:"mandatory"`
-	OrderIndex     int       `json:"order_index"`
-	Answers        []Answer  `json:"answers,omitempty" gorm:"foreignKey:QuestionID"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+
+type Option struct {
+	OptionID    uint      `json:"id" gorm:"primaryKey"`
+	QuestionID  uint      `json:"question_id"`
+	OptionText  string    `json:"option_text"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type SurveyRequirement struct {
@@ -41,12 +50,12 @@ type SurveyRequirement struct {
 }
 
 type Answer struct {
-	AnswerID   uint      `json:"id" gorm:"primaryKey"`
-	SessionID  uint      `json:"session_id"`
-	QuestionID uint      `json:"question_id"`
-	Response   string    `json:"response"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+    AnswerID    uint      `json:"id" gorm:"primaryKey"`
+    SessionID   uint      `json:"session_id"`
+    QuestionID  uint      `json:"question_id"`
+    ResponseData string   `json:"response_data"` // JSON string with appropriate structure for each question type
+    CreatedAt   time.Time `json:"created_at"`
+    UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type SurveySession struct {

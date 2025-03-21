@@ -201,14 +201,19 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 			Status            string `json:"status"`
 		} `json:"basicInfo"`
 		Questions []struct {
-			QuestionText   string   `json:"question_text"`
-			QuestionType   string   `json:"question_type"`
-			Mandatory      bool     `json:"mandatory"`
-			BranchingLogic string   `json:"branching_logic"`
-			Options        []string `json:"options"`
+			QuestionID     uint   `json:"question_id"`
+			QuestionText   string `json:"question_text"`
+			QuestionType   string `json:"question_type"`
+			Mandatory      bool   `json:"mandatory"`
+			BranchingLogic string `json:"branching_logic"`
+			CorrectAnswers string `json:"correct_answers"`
 		} `json:"questions"`
+		Options []struct {
+			OptionText string `json:"option_text"`
+			QuestionID uint   `json:"question_id"`
+		} `json:"options"`
 		MediaFiles []struct {
-			QuestionID string `json:"question_id"`
+			QuestionID uint   `json:"question_id"`
 			FileURL    string `json:"file_url"`
 			FileType   string `json:"file_type"`
 		} `json:"mediaFiles"`
@@ -216,6 +221,8 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 
 	// Unmarshal the JSON content
 	if err := json.Unmarshal([]byte(draft.DraftContent), &draftContent); err != nil {
+		log.Printf("Error unmarshaling draft content: %v", err)
+		log.Printf("Draft content: %s", draft.DraftContent)
 		return 0, err
 	}
 
@@ -272,15 +279,18 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 			surveyID = survey.SurveyID
 		}
 
+		// Create a map to store question objects by ID for later reference
+		questionMap := make(map[uint]models.Question)
+
 		// Add questions
-		for i, q := range draftContent.Questions {
+		for _, q := range draftContent.Questions {
 			question := models.Question{
 				SurveyID:       surveyID,
 				QuestionText:   q.QuestionText,
 				QuestionType:   q.QuestionType,
 				Mandatory:      q.Mandatory,
-				OrderIndex:     i,
 				BranchingLogic: q.BranchingLogic,
+				CorrectAnswers: q.CorrectAnswers,
 				CreatedAt:      time.Now(),
 				UpdatedAt:      time.Now(),
 			}
@@ -288,13 +298,46 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 			if err := s.surveyRepo.CreateQuestionWithTx(ctx, tx, &question); err != nil {
 				return 0, err
 			}
+
+			// Store the created question with its new ID
+			questionMap[q.QuestionID] = question
+		}
+
+		// Add options for multiple-choice questions
+		for _, opt := range draftContent.Options {
+			// Get the created question using the original question_id
+			question, exists := questionMap[opt.QuestionID]
+			if !exists {
+				// Skip if question doesn't exist (should not happen with valid data)
+				log.Printf("Warning: Option references non-existent question ID: %d", opt.QuestionID)
+				continue
+			}
+
+			option := models.Option{
+				QuestionID: question.QuestionID, // Use the new question ID
+				OptionText: opt.OptionText,
+				CreatedAt:  time.Now(),
+				UpdatedAt:  time.Now(),
+			}
+
+			if err := tx.Create(&option).Error; err != nil {
+				return 0, err
+			}
 		}
 
 		// Add media files
 		for _, m := range draftContent.MediaFiles {
+			// Get the created question using the original question_id
+			question, exists := questionMap[m.QuestionID]
+			if !exists {
+				// Skip if question doesn't exist
+				log.Printf("Warning: Media file references non-existent question ID: %d", m.QuestionID)
+				continue
+			}
+
 			mediaFile := models.SurveyMediaFile{
 				SurveyID:   surveyID,
-				QuestionID: 0,
+				QuestionID: question.QuestionID, // Use the new question ID
 				FileURL:    m.FileURL,
 				FileType:   m.FileType,
 				CreatedAt:  time.Now(),

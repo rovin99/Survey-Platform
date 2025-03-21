@@ -28,6 +28,7 @@ interface Question {
     type: "multiple-choice" | "single-choice" | "text" | "rating";
     options: Option[];
     mandatory: boolean;
+    correctAnswers?: string;
     mediaFiles?: Array<{
         id: string;
         url: string;
@@ -53,19 +54,23 @@ interface SurveyDraft {
             status: string;
         };
         questions: Array<{
-            tempId: string;
+            question_id: number;
             question_text: string;
             question_type: string;
             mandatory: boolean;
-            order_index: number;
             branching_logic: string;
-            options?: string[];
+            correct_answers?: string;
             mediaFiles?: Array<{
                 mediaId: number;
                 fileUrl: string;
                 fileType: string;
                 status: 'UPLOADING' | 'READY' | 'ERROR';
             }>;
+        }>;
+        options: Array<{
+            optionId: string;
+            question_id: number;
+            option_text: string;
         }>;
     };
     lastSaved: string;
@@ -96,7 +101,8 @@ export default function SurveyCreatePage() {
                 status: 'DRAFT',
                 conductor_id: 1
             },
-            questions: []
+            questions: [],
+            options: []
         },
         lastSaved: new Date().toISOString()
     });
@@ -113,14 +119,24 @@ export default function SurveyCreatePage() {
     // Utility function to save to localStorage without triggering sync
     const saveToLocalStorage = (draftToSave: SurveyDraft, key = STORAGE_KEY) => {
         try {
-            const serialized = JSON.stringify(draftToSave);
+            // Use requestIdleCallback for non-critical operations when browser is idle
+            // Fall back to setTimeout with zero delay if requestIdleCallback isn't available
+            const saveOperation = () => {
+                const serialized = JSON.stringify(draftToSave);
+                
+                // Check size before saving
+                if (serialized.length > 4 * 1024 * 1024) { // 4MB safety threshold
+                    toast.warning("Draft is getting large, consider publishing soon");
+                }
+                
+                localStorage.setItem(key, serialized);
+            };
             
-            // Check size before saving
-            if (serialized.length > 4 * 1024 * 1024) { // 4MB safety threshold
-                toast.warning("Draft is getting large, consider publishing soon");
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                (window as any).requestIdleCallback(saveOperation, { timeout: 1000 });
+            } else {
+                setTimeout(saveOperation, 0);
             }
-            
-            localStorage.setItem(key, serialized);
         } catch (error) {
             console.error('Error saving to localStorage:', error);
             toast.error("Failed to save draft locally");
@@ -149,27 +165,96 @@ export default function SurveyCreatePage() {
                 if (parsed.draftId) {
                     console.log("Draft ID from localStorage:", parsed.draftId);
                 }
+                
+                // If the old format doesn't have options array, create it
+                if (!parsed.draftContent.options) {
+                    parsed.draftContent.options = [];
+                    
+                    // Move options from questions to the separate array
+                    parsed.draftContent.questions.forEach((q: {
+                        tempId?: string;
+                        question_id?: number;
+                        options?: string[];
+                    }) => {
+                        if (q.options) {
+                            // Handle both old format (tempId) and new format (question_id)
+                            const questionId = q.question_id || parseInt(q.tempId || "0");
+                            q.options.forEach((optText: string, idx: number) => {
+                                parsed.draftContent.options.push({
+                                    optionId: `${questionId}-opt-${idx}`,
+                                    question_id: questionId,
+                                    option_text: optText
+                                });
+                            });
+                            // Remove options from question object
+                            delete q.options;
+                        }
+                        
+                        // Convert any tempId to question_id if needed
+                        if (q.tempId && !q.question_id) {
+                            q.question_id = parseInt(q.tempId) || q.question_id;
+                            delete q.tempId;
+                        }
+                    });
+                }
+                
+                // Convert any remaining tempId to question_id in questions array
+                if (parsed.draftContent.questions.length > 0) {
+                    parsed.draftContent.questions = parsed.draftContent.questions.map((q: any) => {
+                        if (q.tempId && !q.question_id) {
+                            return {
+                                ...q,
+                                question_id: parseInt(q.tempId) || parsed.draftContent.questions.indexOf(q) + 1,
+                                tempId: undefined
+                            };
+                        }
+                        return q;
+                    });
+                }
+                
+                // Convert any questionTempId to question_id in options array
+                if (parsed.draftContent.options.length > 0) {
+                    parsed.draftContent.options = parsed.draftContent.options.map((opt: any) => {
+                        if (opt.questionTempId && !opt.question_id) {
+                            return {
+                                ...opt,
+                                question_id: parseInt(opt.questionTempId) || 0,
+                                questionTempId: undefined
+                            };
+                        }
+                        return opt;
+                    });
+                }
+                
                 setDraft(parsed);
                 
                 // Also sync questions state
                 if (parsed.draftContent.questions.length > 0) {
                     // Transform draft questions to Question interface
-                    const loadedQuestions = parsed.draftContent.questions.map((q: any) => ({
-                        id: q.tempId,
-                        text: q.question_text,
-                        type: q.question_type as any,
-                        mandatory: q.mandatory || false,
-                        options: (q.options || []).map((opt: string, idx: number) => ({
-                            id: `${q.tempId}-opt-${idx}`,
-                            text: opt
-                        })),
-                        mediaFiles: q.mediaFiles?.map((m: any) => ({
-                            id: m.mediaId.toString(),
-                            url: m.fileUrl,
-                            type: m.fileType,
-                            status: m.status as any
-                        }))
-                    }));
+                    const loadedQuestions = parsed.draftContent.questions.map((q: any) => {
+                        // Find options for this question
+                        const questionOptions = parsed.draftContent.options
+                            .filter((opt: any) => opt.question_id === q.question_id)
+                            .map((opt: any, idx: number) => ({
+                                id: opt.optionId || `${q.question_id}-opt-${idx}`,
+                                text: opt.option_text
+                            }));
+                        
+                        return {
+                            id: q.question_id.toString(),
+                            text: q.question_text,
+                            type: q.question_type as any,
+                            mandatory: q.mandatory || false,
+                            correctAnswers: q.correct_answers || "",
+                            options: questionOptions,
+                            mediaFiles: q.mediaFiles?.map((m: any) => ({
+                                id: m.mediaId.toString(),
+                                url: m.fileUrl,
+                                type: m.fileType,
+                                status: m.status as any
+                            }))
+                        };
+                    });
                     setQuestions(loadedQuestions);
                 }
             }
@@ -198,6 +283,7 @@ export default function SurveyCreatePage() {
         }
         
         // Check localStorage for draftId if not present in current data
+        let validDraftId = null;
         if (!draftData.draftId) {
             const savedDraft = localStorage.getItem(STORAGE_KEY);
             if (savedDraft) {
@@ -205,13 +291,26 @@ export default function SurveyCreatePage() {
                     const parsed = JSON.parse(savedDraft);
                     if (parsed.draftId) {
                         console.log(`Retrieved draftId ${parsed.draftId} from localStorage`);
-                        draftData.draftId = parsed.draftId;
+                        validDraftId = parsed.draftId;
+                        draftData.draftId = validDraftId;
                     }
                 } catch (e) {
                     console.error('Error parsing localStorage draft:', e);
                 }
             }
+        } else {
+            validDraftId = draftData.draftId;
         }
+        
+        // Create a question ID mapping for normalization
+        const questionIdMap = new Map<number, number>();
+        
+        // Assign sequential IDs to questions
+        draftData.draftContent.questions.forEach((question, index) => {
+            const originalId = question.question_id;
+            const normalizedId = index + 1; // Start with 1
+            questionIdMap.set(originalId, normalizedId);
+        });
         
         // Transform data to match backend schema
         const transformedContent = {
@@ -222,40 +321,91 @@ export default function SurveyCreatePage() {
                 status: draftData.draftContent.basicInfo.status,
                 conductor_id: draftData.draftContent.basicInfo.conductor_id
             },
-            questions: draftData.draftContent.questions.map(q => ({
+            questions: draftData.draftContent.questions.map((q, index) => ({
+                question_id: index + 1, // Use normalized ID
                 question_text: q.question_text,
                 question_type: q.question_type,
                 mandatory: q.mandatory,
-                order_index: q.order_index,
-                branching_logic: q.branching_logic
+                branching_logic: q.branching_logic,
+                correct_answers: q.correct_answers || ""
+            })),
+            options: draftData.draftContent.options.map(opt => ({
+                option_text: opt.option_text,
+                question_id: questionIdMap.get(opt.question_id) || 1 // Use normalized question ID
             })),
             mediaFiles: draftData.draftContent.questions.flatMap(q => 
                 (q.mediaFiles || []).map(m => ({
-                    question_temp_id: q.tempId,
+                    question_id: questionIdMap.get(q.question_id) || 1, // Use normalized question ID
                     file_url: m.fileUrl,
                     file_type: m.fileType
                 }))
             )
         };
 
+        // Log normalized mappings for debugging
+        console.log('Question ID normalization map:', Object.fromEntries(questionIdMap));
+        console.log('Normalized options:', transformedContent.options);
+
         try {
-            // Use PUT for updates, POST only for new drafts
-            const method = draftData.draftId ? 'PUT' : 'POST';
-            const endpoint = draftData.draftId 
-                ? `${API_BASE_URL}/api/v1/drafts/${draftData.draftId}`
-                : `${API_BASE_URL}/api/v1/drafts`;
+            // Verify if the draft actually exists on the backend before deciding on PUT vs POST
+            let method = 'POST';
+            let endpoint = `${API_BASE_URL}/api/v1/drafts`;
             
-            console.log(`Syncing with method: ${method}, draftId: ${draftData.draftId}`);
+            // Only use PUT if we have a valid draft ID that was previously saved
+            if (validDraftId) {
+                // OPTION 1: Check if draft exists by making a request
+                // Uncomment this block if your backend supports draft existence checks
+                
+                try {
+                    // First try with HEAD request (lightweight)
+                    let checkResponse = await fetch(`${API_BASE_URL}/api/v1/drafts/${validDraftId}`, {
+                        method: 'HEAD'
+                    });
+                    
+                    // If HEAD method is not supported, fall back to GET
+                    if (checkResponse.status === 405) { // Method Not Allowed
+                        console.log('HEAD method not supported, falling back to GET');
+                        checkResponse = await fetch(`${API_BASE_URL}/api/v1/drafts/${validDraftId}`, {
+                            method: 'GET'
+                        });
+                    }
+                    
+                    if (checkResponse.ok) {
+                        method = 'PUT';
+                        endpoint = `${API_BASE_URL}/api/v1/drafts/${validDraftId}`;
+                        console.log(`Draft with ID ${validDraftId} exists, using PUT method`);
+                    } else {
+                        console.log(`Draft with ID ${validDraftId} does not exist (status: ${checkResponse.status}), using POST method`);
+                        // Reset the draftId since it doesn't exist on the server
+                        draftData.draftId = undefined;
+                    }
+                } catch (error) {
+                    console.error('Error checking if draft exists:', error);
+                    console.log('Falling back to POST method');
+                    // Reset the draftId since we couldn't verify it
+                    draftData.draftId = undefined;
+                }
+                
+                
+                
+            } else {
+                console.log('No valid draft ID found, using POST method');
+            }
+            
+            console.log(`Syncing with method: ${method}, endpoint: ${endpoint}`);
             console.log('Draft data being sent:', JSON.stringify(transformedContent, null, 2));
+            
+            const requestBody = {
+                survey_id: draftData.draftContent.basicInfo.conductor_id,
+                draft_content: transformedContent,
+                last_edited_question: draftData.lastEditedQuestion ? parseInt(draftData.lastEditedQuestion) : 0,
+                draft_id: validDraftId || undefined // Initialize with value or undefined
+            };
             
             const response = await fetch(endpoint, {
                 method: method,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    survey_id: draftData.draftContent.basicInfo.conductor_id,
-                    draft_content: transformedContent,
-                    last_edited_question: draftData.lastEditedQuestion ? parseInt(draftData.lastEditedQuestion) : 0
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) throw new Error('Failed to sync with server');
@@ -492,9 +642,12 @@ export default function SurveyCreatePage() {
     // Create a stable debounced function that will queue drafts for syncing
     const queueDraftForSync = useRef(
         debounce((draftData: SurveyDraft) => {
-            // Make a deep copy to ensure we use the latest data
-            pendingDraftRef.current = { ...draftData };
-            processPendingDraft();
+            // Use requestAnimationFrame to schedule intensive work during idle time
+            requestAnimationFrame(() => {
+                // Make a deep copy to ensure we use the latest data
+                pendingDraftRef.current = { ...draftData };
+                processPendingDraft();
+            });
         }, 5000)
     ).current;
     
@@ -526,32 +679,39 @@ export default function SurveyCreatePage() {
 
     // Update draft content with throttling for rapid changes
     const updateDraft = (updates: Partial<SurveyDraft['draftContent']>, lastEditedQuestionId?: string) => {
-        const updatedDraft = {
-            ...draft,
-            draftContent: {
-                ...draft.draftContent,
-                ...updates
-            },
-            lastEditedQuestion: lastEditedQuestionId || draft.lastEditedQuestion,
-            lastSaved: new Date().toISOString()
-        };
-        
-        // Update local state immediately for UI responsiveness
-        setDraft(updatedDraft);
-        
-        // Save to localStorage and trigger debounced backend sync
-        saveDraft(updatedDraft);
+        // Batch state updates using a function update to avoid stale state issues
+        setDraft(prevDraft => {
+            const updatedDraft = {
+                ...prevDraft,
+                draftContent: {
+                    ...prevDraft.draftContent,
+                    ...updates
+                },
+                lastEditedQuestion: lastEditedQuestionId || prevDraft.lastEditedQuestion,
+                lastSaved: new Date().toISOString()
+            };
+            
+            // Save to localStorage and trigger debounced backend sync in the next frame
+            requestAnimationFrame(() => {
+                saveDraft(updatedDraft);
+            });
+            
+            return updatedDraft;
+        });
     };
 
     // Handle media upload
-    const handleMediaUpload = async (file: File, questionTempId: string) => {
+    const handleMediaUpload = async (file: File, questionId: string) => {
+        // Parse question ID to number
+        const questionIdNum = parseInt(questionId);
+        
         // Create a temporary ID for the media file
         const tempMediaId = Date.now().toString();
         
         // Update UI state first with uploading status
         setQuestions(
             questions.map((q) =>
-                q.id === questionTempId
+                q.id === questionId
                     ? {
                           ...q,
                           mediaFiles: [
@@ -578,7 +738,7 @@ export default function SurveyCreatePage() {
         try {
             // Update draft state with uploading status
             const updatedDraftQuestions = draft.draftContent.questions.map(q =>
-                q.tempId === questionTempId ? {
+                q.question_id === questionIdNum ? {
                     ...q,
                     mediaFiles: [
                         ...(q.mediaFiles || []),
@@ -610,7 +770,7 @@ export default function SurveyCreatePage() {
             // Update UI state with success
             setQuestions(
                 questions.map((q) =>
-                    q.id === questionTempId
+                    q.id === questionId
                         ? {
                               ...q,
                               mediaFiles: (q.mediaFiles || []).map(m => 
@@ -625,7 +785,7 @@ export default function SurveyCreatePage() {
 
             // Update draft state with success
             const finalUpdatedQuestions = draft.draftContent.questions.map(q =>
-                q.tempId === questionTempId ? {
+                q.question_id === questionIdNum ? {
                     ...q,
                     mediaFiles: (q.mediaFiles || []).map(m => 
                         m.mediaId === parseInt(tempMediaId)
@@ -635,7 +795,7 @@ export default function SurveyCreatePage() {
                 } : q
             );
 
-            updateDraft({ questions: finalUpdatedQuestions }, questionTempId);
+            updateDraft({ questions: finalUpdatedQuestions }, questionId);
             toast.success('Media uploaded successfully');
         } catch (error) {
             console.error('Upload failed:', error);
@@ -643,7 +803,7 @@ export default function SurveyCreatePage() {
             // Update UI state with error
             setQuestions(
                 questions.map((q) =>
-                    q.id === questionTempId
+                    q.id === questionId
                         ? {
                               ...q,
                               mediaFiles: (q.mediaFiles || []).map(m => 
@@ -658,7 +818,7 @@ export default function SurveyCreatePage() {
             
             // Update draft state with error
             const errorUpdatedQuestions = draft.draftContent.questions.map(q =>
-                q.tempId === questionTempId ? {
+                q.question_id === questionIdNum ? {
                     ...q,
                     mediaFiles: (q.mediaFiles || []).map(m => 
                         m.mediaId === parseInt(tempMediaId)
@@ -699,7 +859,7 @@ export default function SurveyCreatePage() {
         
         // Update draft state
         const updatedQuestions = draft.draftContent.questions.map(q =>
-            q.tempId === questionId ? {
+            q.question_id === parseInt(questionId) ? {
                 ...q,
                 mediaFiles: (q.mediaFiles || []).filter(m => m.mediaId.toString() !== mediaId)
             } : q
@@ -739,7 +899,11 @@ export default function SurveyCreatePage() {
                             console.log(`Publishing draft to: ${publishUrl}`);
                             
                             const response = await fetch(publishUrl, {
-                                method: 'POST'
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    normalizeQuestionIds: true // Add flag to tell backend to normalize question IDs
+                                })
                             });
                             
                             if (!response.ok) {
@@ -807,7 +971,11 @@ export default function SurveyCreatePage() {
             console.log(`Publishing draft to: ${publishUrl}`);
             
             const response = await fetch(publishUrl, {
-                method: 'POST'
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    normalizeQuestionIds: true // Add flag to tell backend to normalize question IDs
+                })
             });
 
             if (!response.ok) {
@@ -838,15 +1006,22 @@ export default function SurveyCreatePage() {
     };
 
     const addQuestion = () => {
-        const tempId = Date.now().toString();
+        // Get the next sequential question ID
+        const nextQuestionId = draft.draftContent.questions.length > 0 
+            ? Math.max(...draft.draftContent.questions.map(q => q.question_id)) + 1
+            : 1;
+        
+        const optionId = `${nextQuestionId}-opt-0`;
+        
         // Create question for UI state
         const newQuestion: Question = {
-            id: tempId,
+            id: nextQuestionId.toString(),
             text: "",
             type: "multiple-choice",
-            options: [{ id: `${tempId}-opt-0`, text: "" }],
+            options: [{ id: optionId, text: "" }],
             mediaFiles: [],
-            mandatory: false
+            mandatory: false,
+            correctAnswers: ""
         };
         
         // Update UI state
@@ -854,87 +1029,98 @@ export default function SurveyCreatePage() {
         
         // Also update draft state for localStorage
         const newDraftQuestion = {
-            tempId: tempId,
+            question_id: nextQuestionId,
             question_text: "",
             question_type: "multiple-choice",
             mandatory: false,
-            order_index: draft.draftContent.questions.length,
             branching_logic: "",
-            options: [""], // Add one empty option
-            mediaFiles: [] // Initialize empty media files array
+            correct_answers: "",
+            mediaFiles: []
+        };
+        
+        // Add a default option to the options array
+        const newOption = {
+            optionId: optionId,
+            question_id: nextQuestionId,
+            option_text: ""
         };
         
         // Update draft content
         updateDraft({
-            questions: [...draft.draftContent.questions, newDraftQuestion]
+            questions: [...draft.draftContent.questions, newDraftQuestion],
+            options: [...draft.draftContent.options, newOption]
         });
     };
 
     const deleteQuestion = (questionId: string) => {
+        // Parse question ID to number
+        const questionIdNum = parseInt(questionId);
+        
         // Update UI state
         setQuestions(questions.filter((q) => q.id !== questionId));
         
         // Also update draft state for localStorage
         updateDraft({
-            questions: draft.draftContent.questions.filter(q => q.tempId !== questionId)
+            questions: draft.draftContent.questions.filter(q => q.question_id !== questionIdNum),
+            options: draft.draftContent.options.filter(opt => opt.question_id !== questionIdNum)
         });
     };
 
     const addOption = (questionId: string) => {
+        // Parse question ID to number
+        const questionIdNum = parseInt(questionId);
+        
+        // Count existing options for this question to generate a unique option ID
+        const optionCount = draft.draftContent.options.filter(
+            opt => opt.question_id === questionIdNum
+        ).length;
+        
+        const optionId = `${questionIdNum}-opt-${optionCount}`;
+        
         // Update UI state
         setQuestions(
             questions.map((q) =>
                 q.id === questionId
                     ? {
-                            ...q,
-                            options: [...q.options, { id: Date.now().toString(), text: "" }],
-                        }
+                          ...q,
+                          options: [...q.options, { id: optionId, text: "" }],
+                      }
                     : q,
             ),
         );
         
         // Also update draft state for localStorage
+        const newOption = {
+            optionId: optionId,
+            question_id: questionIdNum,
+            option_text: ""
+        };
+        
         updateDraft({
-            questions: draft.draftContent.questions.map(q => 
-                q.tempId === questionId
-                    ? { 
-                        ...q, 
-                        options: [...(q.options || []), ""] 
-                    }
-                    : q
-            )
+            options: [...draft.draftContent.options, newOption]
         });
     };
 
     const deleteOption = (questionId: string, optionId: string) => {
-        // Find index of the option in the UI state
-        const question = questions.find(q => q.id === questionId);
-        if (!question) return;
-        
-        const optionIndex = question.options.findIndex(opt => opt.id === optionId);
-        if (optionIndex === -1) return;
+        // Parse question ID to number
+        const questionIdNum = parseInt(questionId);
         
         // Update UI state
         setQuestions(
             questions.map((q) =>
                 q.id === questionId
                     ? {
-                            ...q,
-                            options: q.options.filter((opt) => opt.id !== optionId),
-                        }
+                          ...q,
+                          options: q.options.filter((opt) => opt.id !== optionId),
+                      }
                     : q,
             ),
         );
         
         // Also update draft state for localStorage
         updateDraft({
-            questions: draft.draftContent.questions.map(q => 
-                q.tempId === questionId
-                    ? { 
-                        ...q, 
-                        options: (q.options || []).filter((_, idx) => idx !== optionIndex)
-                    }
-                    : q
+            options: draft.draftContent.options.filter(opt => 
+                !(opt.question_id === questionIdNum && opt.optionId === optionId)
             )
         });
     };
@@ -954,13 +1140,20 @@ export default function SurveyCreatePage() {
             // Wait for any in-progress sync to complete
             if (isSyncingRef.current) {
                 toast.info("Waiting for in-progress sync to complete...");
-                // Wait for a short time to see if the current sync completes
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                if (isSyncingRef.current) {
-                    toast.info("Still syncing, please wait a moment...");
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
+                // Use a more efficient waiting approach
+                await new Promise<void>((resolve) => {
+                    // Check sync status every 100ms instead of blocking for long periods
+                    const checkSync = () => {
+                        if (!isSyncingRef.current) {
+                            resolve();
+                        } else {
+                            setTimeout(checkSync, 100);
+                        }
+                    };
+                    
+                    // First check after 500ms
+                    setTimeout(checkSync, 500);
+                });
             }
             
             setIsLoading(true);
@@ -1003,12 +1196,13 @@ export default function SurveyCreatePage() {
                 }
             } catch (error) {
                 console.error("Inner manual save error:", error);
-                throw error; // Re-throw to be caught by the outer catch
+                throw error;
+            } finally {
+                setIsLoading(false);
             }
         } catch (error) {
             console.error("Manual save failed:", error);
             toast.error("Failed to save draft");
-        } finally {
             setIsLoading(false);
         }
     };
@@ -1104,7 +1298,7 @@ export default function SurveyCreatePage() {
                                                 // Also update draft state for localStorage
                                                 updateDraft({
                                                     questions: draft.draftContent.questions.map(q => 
-                                                        q.tempId === question.id
+                                                        q.question_id === parseInt(question.id)
                                                             ? { ...q, question_type: value }
                                                             : q
                                                     )
@@ -1145,7 +1339,7 @@ export default function SurveyCreatePage() {
                                                         // Also update draft state for localStorage
                                                         updateDraft({
                                                             questions: draft.draftContent.questions.map(q => 
-                                                                q.tempId === question.id
+                                                                q.question_id === parseInt(question.id)
                                                                     ? { ...q, mandatory: isChecked }
                                                                     : q
                                                             )
@@ -1185,7 +1379,7 @@ export default function SurveyCreatePage() {
                                                 // Also update draft state for localStorage
                                                 updateDraft({
                                                     questions: draft.draftContent.questions.map(q => 
-                                                        q.tempId === question.id
+                                                        q.question_id === parseInt(question.id)
                                                             ? { ...q, question_text: e.target.value }
                                                             : q
                                                     )
@@ -1195,6 +1389,43 @@ export default function SurveyCreatePage() {
                                         {question.mandatory && (
                                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-red-500 text-lg">*</span>
                                         )}
+                                    </div>
+
+                                    <div className="space-y-2 mt-4">
+                                        <label htmlFor={`correct-answers-${question.id}`} className="text-sm font-medium flex items-center gap-2">
+                                            Correct Answer(s)
+                                            <span className="text-xs text-muted-foreground">
+                                                {question.type === "multiple-choice" 
+                                                    ? "(Comma-separated option numbers, e.g. 1,3,4)" 
+                                                    : question.type === "single-choice" 
+                                                    ? "(Enter the correct option number, e.g. 2)" 
+                                                    : "(Enter the correct answer text)"}
+                                            </span>
+                                        </label>
+                                        <Input
+                                            id={`correct-answers-${question.id}`}
+                                            value={question.correctAnswers || ""}
+                                            placeholder="Enter correct answer(s)"
+                                            onChange={(e) => {
+                                                // Update UI state
+                                                setQuestions(
+                                                    questions.map((q) =>
+                                                        q.id === question.id
+                                                            ? { ...q, correctAnswers: e.target.value }
+                                                            : q
+                                                    )
+                                                );
+                                                
+                                                // Also update draft state for localStorage
+                                                updateDraft({
+                                                    questions: draft.draftContent.questions.map(q => 
+                                                        q.question_id === parseInt(question.id)
+                                                            ? { ...q, correct_answers: e.target.value }
+                                                            : q
+                                                    )
+                                                });
+                                            }}
+                                        />
                                     </div>
 
                                     {/* Media upload and display section */}
@@ -1271,10 +1502,6 @@ export default function SurveyCreatePage() {
                                                         placeholder="Option text"
                                                         className="flex-1"
                                                         onChange={(e) => {
-                                                            // Find index of the option in the UI state
-                                                            const optionIndex = question.options.findIndex(opt => opt.id === option.id);
-                                                            if (optionIndex === -1) return;
-                                                            
                                                             // Update UI state
                                                             setQuestions(
                                                                 questions.map((q) =>
@@ -1293,17 +1520,10 @@ export default function SurveyCreatePage() {
                                                             
                                                             // Also update draft state for localStorage
                                                             updateDraft({
-                                                                questions: draft.draftContent.questions.map(q => 
-                                                                    q.tempId === question.id
-                                                                        ? { 
-                                                                            ...q, 
-                                                                            options: (q.options || []).map((opt, idx) => 
-                                                                                idx === optionIndex 
-                                                                                    ? e.target.value
-                                                                                    : opt
-                                                                            )
-                                                                        }
-                                                                        : q
+                                                                options: draft.draftContent.options.map(opt => 
+                                                                    (opt.question_id === parseInt(question.id) && opt.optionId === option.id)
+                                                                        ? { ...opt, option_text: e.target.value }
+                                                                        : opt
                                                                 )
                                                             });
                                                         }}

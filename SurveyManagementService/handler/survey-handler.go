@@ -27,11 +27,6 @@ type CreateSurveyRequest struct {
 	ConductorID       uint   `json:"conductor_id"`
 }
 
-type SaveSectionRequest struct {
-	Questions      []models.Question        `json:"questions"`
-	MediaFiles     []models.SurveyMediaFile `json:"media_files"`
-	BranchingLogic []models.BranchingRule   `json:"branching_logic"`
-}
 
 type CreateDraftRequest struct {
 	SurveyID           uint               `json:"survey_id"`
@@ -39,65 +34,6 @@ type CreateDraftRequest struct {
 	LastEditedQuestion uint               `json:"last_edited_question"`
 }
 
-func (h *SurveyHandler) CreateSurvey(c *fiber.Ctx) error {
-	var req CreateSurveyRequest
-	if err := c.BodyParser(&req); err != nil {
-		return response.BadRequest(c, "Invalid request body")
-	}
-
-	survey := &models.Survey{
-		Title:             req.Title,
-		Description:       req.Description,
-		IsSelfRecruitment: req.IsSelfRecruitment,
-		ConductorID:       req.ConductorID,
-	}
-
-	if err := h.surveyService.CreateSurvey(c.Context(), survey); err != nil {
-		return response.InternalServerError(c, "Failed to create survey")
-	}
-
-	return response.Success(c, survey, "Survey created successfully", fiber.StatusCreated)
-}
-
-func (h *SurveyHandler) SaveSection(c *fiber.Ctx) error {
-	surveyID, err := c.ParamsInt("id")
-	if err != nil {
-		return response.BadRequest(c, "Invalid survey ID")
-	}
-
-	var req SaveSectionRequest
-	if err := c.BodyParser(&req); err != nil {
-		return response.BadRequest(c, "Invalid request body")
-	}
-
-	err = h.surveyService.SaveSection(c.Context(), uint(surveyID), req.Questions, req.MediaFiles, req.BranchingLogic)
-	if err != nil {
-		return response.InternalServerError(c, "Failed to save section")
-	}
-
-	return response.Success(c, nil, "Section saved successfully")
-}
-
-func (h *SurveyHandler) SaveDraft(c *fiber.Ctx) error {
-	surveyID, err := c.ParamsInt("id")
-	if err != nil {
-		return response.BadRequest(c, "Invalid survey ID")
-	}
-
-	var draftContent models.JSONContent
-	if err := c.BodyParser(&draftContent); err != nil {
-		return response.BadRequest(c, "Invalid request body")
-	}
-
-	lastEditedQuestion := uint(c.QueryInt("last_edited_question", 0))
-
-	err = h.surveyService.SaveDraft(c.Context(), uint(surveyID), draftContent, lastEditedQuestion)
-	if err != nil {
-		return response.InternalServerError(c, "Failed to save draft")
-	}
-
-	return response.Success(c, nil, "Draft saved successfully")
-}
 
 func (h *SurveyHandler) PublishSurvey(c *fiber.Ctx) error {
 	surveyID, err := c.ParamsInt("id")

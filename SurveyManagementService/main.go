@@ -58,16 +58,56 @@ func setupDatabase() (*gorm.DB, error) {
 	return db, nil
 }
 
-func setupRepositories(db *gorm.DB) (repository.SurveyRepository, repository.SurveyDraftRepository) {
-	return repository.NewSurveyRepository(db), repository.NewSurveyDraftRepository(db)
+type AllRepositories struct {
+	SurveyRepo      repository.SurveyRepository
+	SurveyDraftRepo repository.SurveyDraftRepository
+	QuestionRepo    repository.QuestionRepository
+	OptionRepo      repository.OptionRepository
+	AnswerRepo      repository.AnswerRepository
+	SessionRepo     repository.SurveySessionRepository
 }
 
-func setupServices(surveyRepo repository.SurveyRepository, surveyDraftRepo repository.SurveyDraftRepository) service.SurveyService {
-	return service.NewSurveyService(surveyRepo, surveyDraftRepo)
+type AllServices struct {
+	SurveyService   service.SurveyService
+	QuestionService service.QuestionService
+	OptionService   service.OptionService
+	AnswerService   service.AnswerService
 }
 
-func setupHandlers(surveyService service.SurveyService) *handler.SurveyHandler {
-	return handler.NewSurveyHandler(surveyService)
+type AllHandlers struct {
+	SurveyHandler   *handler.SurveyHandler
+	QuestionHandler *handler.QuestionHandler
+	OptionHandler   *handler.OptionHandler
+	AnswerHandler   *handler.AnswerHandler
+}
+
+func setupRepositories(db *gorm.DB) AllRepositories {
+	return AllRepositories{
+		SurveyRepo:      repository.NewSurveyRepository(db),
+		SurveyDraftRepo: repository.NewSurveyDraftRepository(db),
+		QuestionRepo:    repository.NewQuestionRepository(db),
+		OptionRepo:      repository.NewOptionRepository(db),
+		AnswerRepo:      repository.NewAnswerRepository(db),
+		SessionRepo:     repository.NewSurveySessionRepository(db),
+	}
+}
+
+func setupServices(repos AllRepositories) AllServices {
+	return AllServices{
+		SurveyService:   service.NewSurveyService(repos.SurveyRepo, repos.SurveyDraftRepo),
+		QuestionService: service.NewQuestionService(repos.QuestionRepo, repos.OptionRepo, repos.SurveyRepo),
+		OptionService:   service.NewOptionService(repos.OptionRepo),
+		AnswerService:   service.NewAnswerService(repos.AnswerRepo, repos.QuestionRepo, repos.SessionRepo),
+	}
+}
+
+func setupHandlers(services AllServices) AllHandlers {
+	return AllHandlers{
+		SurveyHandler:   handler.NewSurveyHandler(services.SurveyService),
+		QuestionHandler: handler.NewQuestionHandler(services.QuestionService),
+		OptionHandler:   handler.NewOptionHandler(services.OptionService),
+		AnswerHandler:   handler.NewAnswerHandler(services.AnswerService),
+	}
 }
 
 func main() {
@@ -76,9 +116,9 @@ func main() {
 		log.Fatal("Failed to setup database:", err)
 	}
 
-	surveyRepo, surveyDraftRepo := setupRepositories(db)
-	surveyService := setupServices(surveyRepo, surveyDraftRepo)
-	surveyHandler := setupHandlers(surveyService)
+	repos := setupRepositories(db)
+	services := setupServices(repos)
+	handlers := setupHandlers(services)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
@@ -137,8 +177,12 @@ func main() {
 	app.Use(logger.New())
 	app.Use(recover.New())
 
-	// routes.SetupSurveyRoutes(app, surveyHandler)
-	routes.SetupDraftRoutes(app, surveyHandler)
+	// Setup all routes
+	routes.SetupSurveyRoutes(app, handlers.SurveyHandler)
+	routes.SetupDraftRoutes(app, handlers.SurveyHandler)
+	routes.SetupQuestionRoutes(app, handlers.QuestionHandler)
+	routes.SetupOptionRoutes(app, handlers.OptionHandler)
+	routes.SetupAnswerRoutes(app, handlers.AnswerHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {

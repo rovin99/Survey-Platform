@@ -4,35 +4,19 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/handler"
 )
-// func SetupSurveyRoutes(app *fiber.App, handler *handler.SurveyHandler) {
-// 	surveyGroup := app.Group("/api/surveys")
+func SetupSurveyRoutes(app *fiber.App, handler *handler.SurveyHandler) {
+	surveyGroup := app.Group("/api/surveys")
 
-// 	// Create survey route with validation
-// 	surveyGroup.Post("/",
-// 		middlewares.SurveyValidationMiddleware(),
-// 		handler.CreateSurvey,
-// 	)
+	
+	surveyGroup.Get("/:id/progress",
+		handler.GetProgress,
+	)
 
-// 	// Save section route with validation
-// 	surveyGroup.Post("/:id/sections",
-// 		middlewares.QuestionSectionValidationMiddleware(),
-// 		handler.SaveSection,
-// 	)
+	surveyGroup.Get("/:id",
+		handler.GetSurvey,
+	)
+}
 
-// 	// Publish survey route with validation
-// 	surveyGroup.Post("/:id/publish",
-// 		middlewares.PublishSurveyValidationMiddleware(),
-// 		handler.PublishSurvey,
-// 	)
-
-// 	surveyGroup.Get("/:id/progress",
-// 		handler.GetProgress,
-// 	)
-
-// 	surveyGroup.Get("/:id",
-// 		handler.GetSurvey,
-// 	)
-// }
 
 // SetupDraftRoutes registers routes for draft management
 func SetupDraftRoutes(app *fiber.App, handler *handler.SurveyHandler) {

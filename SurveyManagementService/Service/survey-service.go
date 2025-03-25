@@ -18,7 +18,6 @@ import (
 type SurveyService interface {
 	CreateSurvey(ctx context.Context, survey *models.Survey) error
 	SaveSection(ctx context.Context, surveyID uint, questions []models.Question, mediaFiles []models.SurveyMediaFile, branchingRules []models.BranchingRule) error
-	SaveDraft(ctx context.Context, surveyID uint, content models.JSONContent, lastEditedQuestion uint) error
 	CreateDraft(ctx context.Context, surveyID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error)
 	UpdateDraft(ctx context.Context, draftID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error)
 	PublishSurvey(ctx context.Context, surveyID uint) error
@@ -92,16 +91,48 @@ func (s *surveyService) SaveSection(ctx context.Context, surveyID uint, question
 	})
 }
 
-func (s *surveyService) SaveDraft(ctx context.Context, surveyID uint, content models.JSONContent, lastEditedQuestion uint) error {
-	draft := &models.SurveyDraft{
+// Helper function to pretty print JSON content for logging
+func prettyPrintJSON(content models.JSONContent) string {
+	var prettyContent bytes.Buffer
+	if err := json.Indent(&prettyContent, []byte(content), "", "  "); err == nil {
+		return prettyContent.String()
+	}
+	return string(content)
+}
+
+// Helper function to create a new draft object
+func newDraft(surveyID uint, content models.JSONContent, lastEditedQuestion uint) *models.SurveyDraft {
+	now := time.Now()
+	return &models.SurveyDraft{
 		SurveyID:           surveyID,
 		DraftContent:       content,
 		LastEditedQuestion: lastEditedQuestion,
-		LastSaved:          time.Now(),
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
+		LastSaved:          now,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
-	return s.surveyDraftRepo.SaveDraft(ctx, draft)
+}
+
+func (s *surveyService) CreateDraft(ctx context.Context, surveyID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error) {
+	log.Printf("Service creating draft with content: %s", prettyPrintJSON(content))
+	draft := newDraft(surveyID, content, lastEditedQuestion)
+	return s.surveyDraftRepo.CreateDraft(ctx, draft)
+}
+
+func (s *surveyService) UpdateDraft(ctx context.Context, draftID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error) {
+	log.Printf("Service updating draft %d with content: %s", draftID, prettyPrintJSON(content))
+
+	draft, err := s.surveyDraftRepo.GetByID(ctx, draftID)
+	if err != nil {
+		return nil, err
+	}
+
+	draft.DraftContent = content
+	draft.LastEditedQuestion = lastEditedQuestion
+	draft.LastSaved = time.Now()
+	draft.UpdatedAt = time.Now()
+
+	return s.surveyDraftRepo.Update(ctx, draft)
 }
 
 func (s *surveyService) PublishSurvey(ctx context.Context, surveyID uint) error {
@@ -140,44 +171,6 @@ func (s *surveyService) GetProgress(ctx context.Context, surveyID uint) (*Survey
 
 func (s *surveyService) GetSurvey(ctx context.Context, surveyID uint) (*models.Survey, error) {
 	return s.surveyRepo.GetByID(ctx, surveyID)
-}
-
-func (s *surveyService) CreateDraft(ctx context.Context, surveyID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error) {
-	// Log the content in a readable format
-	var prettyContent bytes.Buffer
-	if err := json.Indent(&prettyContent, []byte(content), "", "  "); err == nil {
-		log.Printf("Service creating draft with content: %s", prettyContent.String())
-	}
-
-	draft := &models.SurveyDraft{
-		SurveyID:           surveyID,
-		DraftContent:       content,
-		LastEditedQuestion: lastEditedQuestion,
-		LastSaved:          time.Now(),
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
-	}
-	return s.surveyDraftRepo.CreateDraft(ctx, draft)
-}
-
-func (s *surveyService) UpdateDraft(ctx context.Context, draftID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error) {
-	// Log the content in a readable format
-	var prettyContent bytes.Buffer
-	if err := json.Indent(&prettyContent, []byte(content), "", "  "); err == nil {
-		log.Printf("Service updating draft %d with content: %s", draftID, prettyContent.String())
-	}
-
-	draft, err := s.surveyDraftRepo.GetByID(ctx, draftID)
-	if err != nil {
-		return nil, err
-	}
-
-	draft.DraftContent = content
-	draft.LastEditedQuestion = lastEditedQuestion
-	draft.LastSaved = time.Now()
-	draft.UpdatedAt = time.Now()
-
-	return s.surveyDraftRepo.Update(ctx, draft)
 }
 
 func (s *surveyService) GetDraft(ctx context.Context, draftID uint) (*models.SurveyDraft, error) {

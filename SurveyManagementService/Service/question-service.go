@@ -7,6 +7,7 @@ import (
 
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+
 	"gorm.io/gorm"
 )
 
@@ -54,7 +55,7 @@ func (s *questionService) GetQuestionByID(ctx context.Context, id uint) (*models
 		return nil, errors.New("invalid question ID")
 	}
 
-	return nil, errors.New("not implemented")
+	return s.questionRepo.GetByID(ctx, id)
 }
 
 func (s *questionService) GetQuestionsBySurveyID(ctx context.Context, surveyID uint) ([]models.Question, error) {

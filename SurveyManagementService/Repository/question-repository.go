@@ -2,12 +2,14 @@ package repository
 
 import (
 	"context"
-	"gorm.io/gorm"
+
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"gorm.io/gorm"
 )
 
 type QuestionRepository interface {
 	Create(ctx context.Context, question *models.Question) error
+	GetByID(ctx context.Context, id uint) (*models.Question, error)
 	GetBySurveyID(ctx context.Context, surveyID uint) ([]models.Question, error)
 	Update(ctx context.Context, question *models.Question) error
 	Delete(ctx context.Context, id uint) error
@@ -37,4 +39,10 @@ func (r *questionRepository) Update(ctx context.Context, question *models.Questi
 
 func (r *questionRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&models.Question{}, id).Error
+}
+
+func (r *questionRepository) GetByID(ctx context.Context, id uint) (*models.Question, error) {
+	var question models.Question
+	err := r.db.WithContext(ctx).First(&question, id).Error
+	return &question, err
 }

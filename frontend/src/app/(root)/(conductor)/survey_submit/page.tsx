@@ -11,99 +11,96 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { CheckCircle, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { z } from "zod";
-
-// Define schema using Zod for validation
-const surveySchema = z.object({
-	satisfaction: z.string().min(1, "This question is required"),
-	recommend: z.string().min(1, "This question is required"),
-	feedback: z
-		.string()
-		.max(500, "Feedback cannot exceed 500 characters")
-		.optional(),
-});
-
-// Sample question data (must be fetched from the backend)
-const surveyQuestions = [
-	{
-		id: "satisfaction",
-		question: "How satisfied are you with our service?",
-		options: [
-			"Very Satisfied",
-			"Satisfied",
-			"Neutral",
-			"Dissatisfied",
-			"Very Dissatisfied",
-		],
-		required: true,
-	},
-	{
-		id: "recommend",
-		question: "Would you recommend us to others?",
-		options: ["Yes", "No"],
-		required: true,
-	},
-	{
-		id: "feedback",
-		question: "Any additional feedback?",
-		options: [],
-		maxLength: 500,
-	},
-];
+import { useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { surveyService } from "@/services/surveyService";
+import type { Survey, Question, Answer } from "@/services/surveyService";
 
 export default function Survey() {
+	const searchParams = useSearchParams();
+	const surveyId = searchParams.get("id");
+
+	const [survey, setSurvey] = useState<Survey | null>(null);
 	const [currentIndex, setCurrentIndex] = useState(-1);
 	const [responses, setResponses] = useState<Record<string, string>>({});
 	const [errors, setErrors] = useState<Record<string, string>>({});
 	const [hasSubmitted, setHasSubmitted] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [isLoading, setIsLoading] = useState(true);
+
+	useEffect(() => {
+		const fetchSurveyData = async () => {
+			if (!surveyId) {
+				toast.error("Survey ID is required");
+				return;
+			}
+
+			try {
+				setIsLoading(true);
+				const surveyData = await surveyService.getSurvey(surveyId);
+				setSurvey(surveyData);
+
+				// Check for existing progress
+				const progress = await surveyService.getProgress(surveyId);
+				if (progress.currentQuestionIndex > -1) {
+					setCurrentIndex(progress.currentQuestionIndex);
+				}
+			} catch (error) {
+				toast.error("Failed to load survey");
+				console.error("Error loading survey:", error);
+			} finally {
+				setIsLoading(false);
+			}
+		};
+
+		fetchSurveyData();
+	}, [surveyId]);
+
+	// Track progress using local storage
+	useEffect(() => {
+		if (surveyId) {
+			const savedData = localStorage.getItem(`surveyProgress_${surveyId}`);
+			if (savedData) {
+				const { index, responses } = JSON.parse(savedData);
+				setCurrentIndex(index);
+				setResponses(responses);
+			}
+		}
+	}, [surveyId]);
+
+	useEffect(() => {
+		if (surveyId) {
+			localStorage.setItem(
+				`surveyProgress_${surveyId}`,
+				JSON.stringify({ index: currentIndex, responses })
+			);
+		}
+	}, [currentIndex, responses, surveyId]);
+
+	const currentQuestion = survey?.questions[currentIndex];
 
 	const handleStart = () => setCurrentIndex(0);
 	const handleReturn = () => setCurrentIndex(-1);
 
-	// Survey metadata
-	const surveyTitle = "Customer Satisfaction Survey";
-	const surveyDescription =
-		"Thank you for taking the time to complete our survey. Your feedback helps us improve our services. Please answer the questions honestly.";
-	const surveyConductedBy = "XYZ Company";
-
-	// Track progress using local storage
-	useEffect(() => {
-		const savedData = localStorage.getItem("surveyProgress");
-		if (savedData) {
-			const { index, responses } = JSON.parse(savedData);
-			setCurrentIndex(index);
-			setResponses(responses);
-		}
-	}, []);
-
-	useEffect(() => {
-		localStorage.setItem(
-			"surveyProgress",
-			JSON.stringify({ index: currentIndex, responses }),
-		);
-	}, [currentIndex, responses]);
-
-	const currentQuestion = surveyQuestions[currentIndex];
-
-	// Go to previous question
 	const handlePrevious = (event: React.MouseEvent<HTMLButtonElement>) => {
 		event.preventDefault();
-		setErrors((prevErrors) => ({ ...prevErrors, [currentQuestion.id]: "" }));
+		if (currentQuestion) {
+			setErrors((prevErrors) => ({ ...prevErrors, [currentQuestion.id]: "" }));
+		}
 
-		// Allow navigation back to details card when on first question
 		setCurrentIndex((prev) => {
-			if (prev === 0) return -1; // Special case for first question
+			if (prev === 0) return -1;
 			return Math.max(0, prev - 1);
 		});
 	};
 
-	// Go to next question
 	const handleNext = () => {
+		if (!currentQuestion) return;
+
 		const questionId = currentQuestion.id;
 		const response = responses[questionId];
 
-		if (currentQuestion.required && !response) {
+		if (currentQuestion.mandatory && !response) {
 			setErrors((prevErrors) => ({
 				...prevErrors,
 				[questionId]: "This question is required",
@@ -112,38 +109,132 @@ export default function Survey() {
 		}
 
 		setErrors((prevErrors) => ({ ...prevErrors, [questionId]: "" }));
-		setCurrentIndex((prev) => Math.min(surveyQuestions.length - 1, prev + 1));
+		setCurrentIndex((prev) => Math.min((survey?.questions.length || 0) - 1, prev + 1));
 	};
 
-	// Submit the survey
 	const handleSubmit = async (event: React.FormEvent) => {
 		event.preventDefault();
-		const parsed = surveySchema.safeParse(responses);
-
-		if (!parsed.success) {
-			const newErrors = parsed.error.flatten().fieldErrors;
-			setErrors(
-				Object.fromEntries(
-					Object.entries(newErrors).map(([key, value]) => [
-						key,
-						value?.[0] || "",
-					]),
-				),
-			);
-			return;
-		}
+		if (!surveyId) return;
 
 		setIsSubmitting(true);
 		try {
-			await new Promise((resolve) => setTimeout(resolve, 1500)); // Simulate API request
-			localStorage.removeItem("surveyProgress");
+			const answers: Answer[] = Object.entries(responses).map(([questionId, value]) => ({
+				questionId: parseInt(questionId),
+				value,
+			}));
+
+			await surveyService.submitAnswers(surveyId, answers);
+			localStorage.removeItem(`surveyProgress_${surveyId}`);
 			setHasSubmitted(true);
+			toast.success("Survey submitted successfully!");
 		} catch (error) {
+			toast.error("Failed to submit survey");
 			console.error("Submission failed:", error);
 		} finally {
 			setIsSubmitting(false);
 		}
 	};
+
+	const renderQuestionInput = (question: Question) => {
+		switch (question.question_type) {
+			case "multiple-choice":
+				const options = question.correct_answers.split(",").map(opt => opt.trim());
+				return (
+					<div className="flex flex-col gap-2">
+						{options.map((option, idx) => (
+							<Button
+								key={option}
+								type="button"
+								variant={
+									responses[question.id] === option
+										? "default"
+										: "outline"
+								}
+								className="w-full justify-start"
+								onClick={() =>
+									setResponses((prev) => ({
+										...prev,
+										[question.id]: option,
+									}))
+								}
+							>
+								<span className="mr-2 text-muted-foreground">
+									{idx + 1}.
+								</span>
+								{option}
+							</Button>
+						))}
+					</div>
+				);
+
+			case "text":
+				return (
+					<div className="space-y-4">
+						<textarea
+							name={question.id.toString()}
+							className="w-full p-2 border rounded-md min-h-[100px]"
+							placeholder="Type your response..."
+							value={responses[question.id] || ""}
+							onChange={(e) =>
+								setResponses((prev) => ({
+									...prev,
+									[question.id]: e.target.value,
+								}))
+							}
+							maxLength={500}
+							autoFocus
+						/>
+						<div className="text-sm text-muted-foreground text-right">
+							{responses[question.id]?.length || 0}/500
+						</div>
+					</div>
+				);
+
+			case "rating":
+				return (
+					<div className="flex justify-center gap-2">
+						{[1, 2, 3, 4, 5].map((rating) => (
+							<Button
+								key={rating}
+								type="button"
+								variant={
+									responses[question.id] === rating.toString()
+										? "default"
+										: "outline"
+								}
+								onClick={() =>
+									setResponses((prev) => ({
+										...prev,
+										[question.id]: rating.toString(),
+									}))
+								}
+							>
+								{rating}
+							</Button>
+						))}
+					</div>
+				);
+
+			default:
+				return null;
+		}
+	};
+
+	if (isLoading) {
+		return (
+			<div className="flex items-center justify-center min-h-screen">
+				<Loader2 className="h-8 w-8 animate-spin" />
+			</div>
+		);
+	}
+
+	if (!survey) {
+		return (
+			<div className="flex flex-col items-center justify-center min-h-screen p-4">
+				<h1 className="text-2xl font-bold text-red-500">Survey not found</h1>
+			</div>
+		);
+	}
 
 	if (hasSubmitted) {
 		return (
@@ -160,20 +251,19 @@ export default function Survey() {
 	return (
 		<form onSubmit={handleSubmit} className="space-y-4">
 			<div className="flex flex-col items-center justify-center min-h-screen p-4 space-y-4">
-				{/* Survey Title (Always Visible) */}
 				<div className="text-center">
-					<h1 className="text-2xl font-bold">{surveyTitle}</h1>
+					<h1 className="text-2xl font-bold">{survey.title}</h1>
 				</div>
-				{currentIndex == -1 ? (
+				{currentIndex === -1 ? (
 					<Card className="mb-6 max-w-md mx-auto border border-gray-200 shadow-md bg-white dark:bg-gray-900 dark:border-gray-700 p-4">
 						<CardHeader className="p-4">
 							<p className="text-sm text-gray-500 dark:text-gray-400">
-								{surveyDescription}
+								{survey.description}
 							</p>
 						</CardHeader>
 						<CardContent className="p-4 text-sm text-gray-700 dark:text-gray-300">
 							<p className="font-medium">Conducted by:</p>
-							<p>{surveyConductedBy}</p>
+							<p>Survey Platform</p>
 						</CardContent>
 						<CardFooter className="p-4 flex justify-between">
 							<Button
@@ -196,65 +286,18 @@ export default function Survey() {
 					<Card className="w-full max-w-lg shadow-lg transition-all duration-300">
 						<CardHeader>
 							<CardTitle className="text-lg">
-								{currentQuestion.question}
-								{currentQuestion.required && (
+								{currentQuestion?.question_text}
+								{currentQuestion?.mandatory && (
 									<span className="text-red-500 ml-1">*</span>
 								)}
 							</CardTitle>
 						</CardHeader>
 
 						<CardContent>
-							{currentQuestion.options.length > 0 ? (
-								<div className="flex flex-col gap-2">
-									{currentQuestion.options.map((option, idx) => (
-										<Button
-											key={option}
-											type="button"
-											variant={
-												responses[currentQuestion.id] === option
-													? "default"
-													: "outline"
-											}
-											className="w-full justify-start"
-											onClick={() =>
-												setResponses((prev) => ({
-													...prev,
-													[currentQuestion.id]: option,
-												}))
-											}
-										>
-											<span className="mr-2 text-muted-foreground">
-												{idx + 1}.
-											</span>
-											{option}
-										</Button>
-									))}
-								</div>
-							) : (
-								<div className="space-y-4">
-									<textarea
-										name={currentQuestion.id}
-										className="w-full p-2 border rounded-md min-h-[100px]"
-										placeholder="Type your response..."
-										value={responses[currentQuestion.id] || ""}
-										onChange={(e) =>
-											setResponses((prev) => ({
-												...prev,
-												[currentQuestion.id]: e.target.value,
-											}))
-										}
-										maxLength={currentQuestion.maxLength}
-										autoFocus
-									/>
-									<div className="text-sm text-muted-foreground text-right">
-										{responses[currentQuestion.id]?.length || 0}/
-										{currentQuestion.maxLength}
-									</div>
-								</div>
-							)}
-							{errors[currentQuestion.id] && (
+							{currentQuestion && renderQuestionInput(currentQuestion)}
+							{errors[currentQuestion?.id || ""] && (
 								<p className="text-sm text-destructive mt-2">
-									{errors[currentQuestion.id]}
+									{errors[currentQuestion?.id || ""]}
 								</p>
 							)}
 						</CardContent>
@@ -267,12 +310,12 @@ export default function Survey() {
 								<Button
 									type="button"
 									variant={
-										currentIndex === surveyQuestions.length - 1
+										currentIndex === (survey.questions.length - 1)
 											? "default"
 											: "outline"
 									}
 									onClick={
-										currentIndex === surveyQuestions.length - 1
+										currentIndex === (survey.questions.length - 1)
 											? handleSubmit
 											: handleNext
 									}
@@ -281,7 +324,7 @@ export default function Survey() {
 									{isSubmitting && (
 										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 									)}
-									{currentIndex === surveyQuestions.length - 1
+									{currentIndex === (survey.questions.length - 1)
 										? isSubmitting
 											? "Submitting..."
 											: "Submit"
@@ -289,14 +332,14 @@ export default function Survey() {
 								</Button>
 							</div>
 							<p className="text-sm text-muted-foreground">
-								Question {currentIndex + 1} of {surveyQuestions.length}
+								Question {currentIndex + 1} of {survey.questions.length}
 							</p>
 						</CardFooter>
 					</Card>
 				)}
 
 				<Progress
-					value={((currentIndex + 1) / surveyQuestions.length) * 100}
+					value={((currentIndex + 1) / (survey.questions.length || 1)) * 100}
 					className="w-full max-w-lg"
 				/>
 			</div>

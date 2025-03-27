@@ -47,6 +47,7 @@ type SurveyRequirement struct {
 	MinProficiencyLevel int       `json:"min_proficiency_level"`
 	ExperienceLevel     string    `json:"experience_level"` // Enum: Beginner, Intermediate, Advanced
 	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type Answer struct {
@@ -76,6 +77,7 @@ type SurveyMediaFile struct {
 	FileURL    string    `json:"file_url"`
 	FileType   string    `json:"file_type"` // Enum: IMAGE, VIDEO, AUDIO, DOCUMENT
 	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // MediaRepository defines the interface for media storage operations

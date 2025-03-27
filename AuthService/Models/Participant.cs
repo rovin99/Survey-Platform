@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
 
@@ -15,6 +16,8 @@ namespace AuthService.Models
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
+        [JsonIgnore]
+        public ICollection<ParticipantsSkill> Skills { get; set; }
     }
 
     public enum ExperienceLevel

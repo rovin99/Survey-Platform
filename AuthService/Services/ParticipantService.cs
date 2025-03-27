@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Linq;
 using AuthService.Models;
 using AuthService.Repositories;
 using AuthService.Utils;
@@ -27,11 +28,18 @@ namespace AuthService.Services
             var participant = new Participant
             {
                 UserId = userId,
-                ExperienceLevel = request.ExperienceLevel,
-                Rating = request.Rating,
-                IsActive = request.IsActive,
+                ExperienceLevel = ExperienceLevel.BEGINNER,
+                Rating = 0,
+                IsActive = true,
                 CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                UpdatedAt = DateTime.UtcNow,
+                Skills = request.Skills.Select(skill => new ParticipantsSkill
+                {
+                    SkillName = skill.SkillName,
+                    ProficiencyLevel = skill.ProficiencyLevel,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                }).ToList()
             };
 
             await _participantRepository.AddAsync(participant);

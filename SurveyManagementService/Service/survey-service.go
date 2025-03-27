@@ -245,11 +245,16 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 
 			surveyID = existingSurvey.SurveyID
 
-			// Delete existing questions and media files
+			// First delete options, then questions
+			if err := s.surveyRepo.DeleteOptionsWithTx(ctx, tx, surveyID); err != nil {
+				return 0, err
+			}
+
 			if err := s.surveyRepo.DeleteQuestionsWithTx(ctx, tx, surveyID); err != nil {
 				return 0, err
 			}
 
+			// Delete existing media files
 			if err := s.surveyRepo.DeleteMediaFilesWithTx(ctx, tx, surveyID); err != nil {
 				return 0, err
 			}

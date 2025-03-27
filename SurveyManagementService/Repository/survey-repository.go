@@ -22,6 +22,7 @@ type SurveyRepository interface {
 	DeleteMediaFilesWithTx(ctx context.Context, tx *gorm.DB, surveyID uint) error
 	CreateQuestionWithTx(ctx context.Context, tx *gorm.DB, question *models.Question) error
 	CreateMediaFileWithTx(ctx context.Context, tx *gorm.DB, mediaFile *models.SurveyMediaFile) error
+	DeleteOptionsWithTx(ctx context.Context, tx *gorm.DB, surveyID uint) error
 }
 
 type Transaction interface {
@@ -104,4 +105,14 @@ func (r *surveyRepository) CreateQuestionWithTx(ctx context.Context, tx *gorm.DB
 
 func (r *surveyRepository) CreateMediaFileWithTx(ctx context.Context, tx *gorm.DB, mediaFile *models.SurveyMediaFile) error {
 	return tx.WithContext(ctx).Create(mediaFile).Error
+}
+
+func (r *surveyRepository) DeleteOptionsWithTx(ctx context.Context, tx *gorm.DB, surveyID uint) error {
+	return tx.Exec(`
+		DELETE FROM options 
+		WHERE question_id IN (
+			SELECT question_id 
+			FROM questions 
+			WHERE survey_id = ?
+		)`, surveyID).Error
 }

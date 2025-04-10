@@ -26,3 +26,12 @@ packages/
 # Ignore logs and lock files
 *.log
 *.lock
+
+# Ignore config.yaml
+configmap.yaml
+
+# Ignore secrets.yaml
+secrets.yaml
+
+# Ignore DatabaseSeeders.cs
+DatabaseSeeders.cs

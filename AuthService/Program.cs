@@ -74,7 +74,11 @@ builder.Services.AddCors(options =>
         builder =>
         {
             builder
-                .WithOrigins("http://localhost:3000")
+                .WithOrigins(
+                    "http://localhost:3000",
+                    "http://localhost:5000", // Add your survey service URL if different
+                    "http://localhost:5001"  // Add any other needed services
+                )
                 .AllowAnyMethod()
                 .AllowAnyHeader()
                 .AllowCredentials();

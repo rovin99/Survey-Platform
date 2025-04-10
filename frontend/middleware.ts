@@ -4,7 +4,9 @@ import type { NextRequest } from 'next/server';
 
 
 export function middleware(request: NextRequest) {
-  const authToken = request.cookies.get('refresh_token')?.value;
+  // Consider using auth_token instead of refresh_token based on your auth.service.ts
+  const authToken = request.cookies.get('auth_token')?.value || 
+                   request.cookies.get('refresh_token')?.value;
   const path = request.nextUrl.pathname;
 
   // Protected routes

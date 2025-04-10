@@ -46,6 +46,7 @@ function SurveyComponentInner() {
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isLoading, setIsLoading] = useState(true);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
+    const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
     // Ref to track if initial load is done to prevent premature draft saves
     const initialLoadComplete = useRef(false);
@@ -61,41 +62,115 @@ function SurveyComponentInner() {
 
 			try {
 				setIsLoading(true);
-                // 1. Fetch Survey Structure (assuming this is still needed from old service or combined)
-                //    If participantService.startOrResume also returns survey details, adjust accordingly.
-                // const surveyData = await surveyService.getSurvey(surveyId);
-                // setSurvey(surveyData);
-
-                // 2. Call the new backend endpoint to start/resume session and get draft
-                const { session: sessionData, draft: draftData, survey: surveyData } = await participantService.startOrResume(surveyId); // Adjust if survey data comes separately
-                setSurvey(surveyData); // Set survey structure
-				setSession(sessionData);
-
-                // Restore state from session and draft
-				if (sessionData?.lastQuestionId) {
-                    // Find index corresponding to lastQuestionId
-                    const lastIndex = surveyData?.questions.findIndex((q: Question) => q.id === sessionData.lastQuestionId) ?? -1;
-                    setCurrentIndex(lastIndex >= 0 ? lastIndex : 0); // Go to last question or first if ID invalid
+                
+                // Fetch session and draft from backend
+                const result = await participantService.startOrResume(surveyId);
+                
+                console.log("Result from API:", result);
+                
+                // Validate API response structure
+                if (!result) {
+                    toast.error("Invalid API response: empty response");
+                    throw new Error("Invalid API response: empty response");
+                }
+                
+                // Safely extract data with fallbacks
+                const { session: sessionData, draft: draftData, survey: surveyData } = result || {};
+                
+                if (!sessionData || !surveyData) {
+                    const errorMessage = "Invalid response: Missing session or survey data";
+                    toast.error(errorMessage);
+                    throw new Error(errorMessage);
+                }
+                
+                console.log("Survey data received:", surveyData);
+                console.log("Survey questions:", surveyData.questions);
+                
+                setSurvey(surveyData);
+                setSession(sessionData);
+                
+                // Check if we have a local draft in localStorage
+                let localDraft = null;
+                if (sessionData?.id) {
+                    try {
+                        const localDraftData = localStorage.getItem(`survey_response_${sessionData.id}`);
+                        if (localDraftData) {
+                            localDraft = JSON.parse(localDraftData);
+                        }
+                    } catch (e) {
+                        console.error("Error parsing local draft:", e);
+                    }
+                }
+                
+                // Determine which draft to use (backend or local) based on timestamps
+                let draftToUse = draftData;
+                let draftResponses = {};
+                
+                if (localDraft && draftData) {
+                    // Convert dates to comparable format
+                    const backendDate = new Date(draftData.lastSaved).getTime();
+                    const localDate = new Date(localDraft.timestamp).getTime();
+                    
+                    // Compare timestamps and use the most recent draft
+                    if (localDate > backendDate) {
+                        console.log("Using local draft (more recent)");
+                        draftToUse = localDraft;
+                    } else {
+                        console.log("Using backend draft (more recent)");
+                    }
+                } else if (localDraft && !draftData) {
+                    // Only have local draft
+                    console.log("Using local draft (no backend draft)");
+                    draftToUse = localDraft;
+                }
+                
+                // Process the selected draft
+                if (draftToUse) {
+                    // Handle different formats from different sources
+                    if (draftToUse === localDraft) {
+                        // Local draft format
+                        draftResponses = localDraft.answers || {};
+                        
+                        // If we have a local lastQuestionId, use that
+                        if (localDraft.lastQuestionId) {
+                            const localLastIndex = surveyData?.questions.findIndex(
+                                (q) => q.id === localDraft.lastQuestionId
+                            ) ?? -1;
+                            setCurrentIndex(localLastIndex >= 0 ? localLastIndex : 0);
+                        }
+                        setLastSaved(new Date(localDraft.timestamp));
+                    } else {
+                        // Backend draft format
+                        // Handle both string and object formats
+                        if (typeof draftToUse.draftAnswersContent === 'string') {
+                            try {
+                                draftResponses = JSON.parse(draftToUse.draftAnswersContent);
+                            } catch (e) {
+                                console.error("Error parsing draft content:", e);
+                            }
+                        } else {
+                            draftResponses = draftToUse.draftAnswersContent;
+                        }
+                        
+                        // Set last question index from session data
+                        if (sessionData?.lastQuestionId) {
+                            const lastIndex = surveyData?.questions.findIndex(
+                                (q) => q.id === sessionData.lastQuestionId
+                            ) ?? -1;
+                            setCurrentIndex(lastIndex >= 0 ? lastIndex : 0);
+                        }
+                        setLastSaved(new Date(draftToUse.lastSaved));
+                    }
                 } else {
-                    setCurrentIndex(-1); // Go to start screen if no progress saved in session
+                    // No draft at all
+                    setCurrentIndex(-1);
                 }
-
-				if (draftData?.draftAnswersContent) {
-					// Backend returns JSON, parse it (GORM might return map[string]interface{} directly)
-                    // Ensure draftData.draftAnswersContent is parsed if it's a string
-                    const draftResponses = typeof draftData.draftAnswersContent === 'string'
-                        ? JSON.parse(draftData.draftAnswersContent)
-                        : draftData.draftAnswersContent;
-					setResponses(draftResponses || {});
-				} else {
-                    setResponses({}); // Start with empty responses if no draft
-                }
-                initialLoadComplete.current = true; // Mark initial load as done
-
+                
+                setResponses(draftResponses || {});
+                initialLoadComplete.current = true;
 			} catch (error) {
-				toast.error("Failed to load survey session");
 				console.error("Error loading survey/session:", error);
-                // Handle specific errors, e.g., 401 Unauthorized
+				toast.error("Failed to load survey session");
 			} finally {
 				setIsLoading(false);
 			}
@@ -108,33 +183,45 @@ function SurveyComponentInner() {
     // --- Auto-Save Draft ---
     const debouncedSaveDraft = useCallback(
         debounce(async (sessionId: number, lastQuestionId: number | null, currentResponses: Record<string, any>) => {
-            if (!sessionId || !initialLoadComplete.current) return; // Don't save if no session or initial load pending
+            if (!sessionId || !initialLoadComplete.current) return;
 
-            // Find the ID of the currently viewed question
-            const currentQuestionModel = survey?.questions?.[lastQuestionId ?? -1]; // Use currentIndex state
+            const currentQuestionModel = survey?.questions?.[currentIndex];
             const currentQuestionModelId = currentQuestionModel ? currentQuestionModel.id : null;
 
+            // Save to localStorage as backup
+            const timestamp = new Date().toISOString();
+            try {
+                localStorage.setItem(`survey_response_${sessionId}`, JSON.stringify({
+                    answers: currentResponses,
+                    lastQuestionId: currentQuestionModelId,
+                    timestamp
+                }));
+            } catch (e) {
+                console.error("Error saving to localStorage:", e);
+            }
 
             setIsSavingDraft(true);
-            console.log("Attempting to save draft:", { sessionId, lastQuestionId: currentQuestionModelId, currentResponses });
             try {
                 await participantService.saveDraft(sessionId, currentQuestionModelId, currentResponses);
-                console.log("Draft saved successfully");
-                // Optionally show a subtle saving indicator/toast
+                setLastSaved(new Date());
             } catch (error) {
                 console.error("Failed to save draft:", error);
-                toast.error("Failed to save progress. Please check connection.", { duration: 2000 });
+                if (Math.random() < 0.3) {
+                    toast.error("Failed to save progress. Please check connection.", { duration: 2000 });
+                }
             } finally {
                 setIsSavingDraft(false);
             }
-        }, 1500), // Debounce time: 1.5 seconds
-    [survey?.questions]); // Dependency includes survey questions to correctly map index to ID
+        }, 1500),
+        [survey?.questions, currentIndex]
+    );
 
+    // Trigger draft save when responses or current question changes
     useEffect(() => {
-        if (session?.id && currentIndex > -1) { // Only save when in a question screen
+        if (session?.id && currentIndex > -1 && initialLoadComplete.current) { // Only save when in a question screen and after initial load
             debouncedSaveDraft(session.id, currentIndex, responses);
         }
-    }, [currentIndex, responses, session?.id, debouncedSaveDraft]);
+    }, [responses, currentIndex, session?.id, debouncedSaveDraft]);
     // --- End Auto-Save ---
 
 
@@ -142,12 +229,14 @@ function SurveyComponentInner() {
 
 	const handleStart = () => {
         if (survey?.questions && survey.questions.length > 0) {
+            console.log("Starting survey with questions:", survey.questions);
             setCurrentIndex(0); // Go to the first question
         } else {
+            console.log("No questions found in survey:", survey);
             toast.info("This survey has no questions.");
-            // Maybe submit immediately or show a different message
         }
     };
+    
 	const handleReturn = () => {
         // Navigate back or close survey logic
         window.history.back(); // Example
@@ -203,23 +292,25 @@ function SurveyComponentInner() {
 		setIsSubmitting(true);
 		try {
 			// Format answers correctly for the backend DTO (FinalAnswerInput)
-			const answersToSubmit: FinalAnswerInput[] = Object.entries(responses).map(([questionIdStr, value]) => ({
-				questionId: parseInt(questionIdStr, 10),
-				responseData: value, // Send the raw value (string, number, array, etc.)
-			}));
+			const answersToSubmit: FinalAnswerInput[] = Object.entries(responses)
+			    .filter(([_, value]) => value !== undefined && value !== null && value !== "") // Filter out empty responses
+			    .map(([questionIdStr, value]) => ({
+				    questionId: parseInt(questionIdStr, 10),
+				    responseData: value, // Send the raw value (string, number, array, etc.)
+			    }));
 
 			await participantService.submitSurvey(session.id, answersToSubmit);
-			// No need to remove localStorage item anymore
 			setHasSubmitted(true);
 			toast.success("Survey submitted successfully!");
 		} catch (error: any) {
-            if (error?.response?.data?.error === "Session not in progress") {
+            if (error?.response?.status === 409 || 
+                error?.response?.data?.error === "survey session is not in progress") {
                  toast.error("This survey has already been submitted or is no longer active.");
                  setHasSubmitted(true); // Treat as submitted to prevent further action
             } else {
 			    toast.error("Failed to submit survey");
+                console.error("Submission failed:", error);
             }
-			console.error("Submission failed:", error);
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -238,11 +329,15 @@ function SurveyComponentInner() {
 
 	// --- Render Functions (Minor adjustments) ---
 	const renderQuestionInput = (question: Question) => {
+        console.log("Rendering question:", question);
         const questionIdStr = question.id.toString();
         const responseValue = responses[questionIdStr];
+        const questionType = question.question_type.toLowerCase();
 
-		switch (question.question_type) {
+		switch (questionType) {
 			case "multiple-choice":
+			case "multiple_choice":
+			case "multiplechoice":
 				// Parse options from correct_answers string
 				const options = question.correct_answers?.split(',').map(opt => opt.trim()) || [];
 
@@ -288,7 +383,8 @@ function SurveyComponentInner() {
 					</div>
 				);
 
-			case "rating": // Assuming rating is 1-5 stored as string or number
+			case "rating":
+			case "rating_scale":
 				return (
 					<div className="flex justify-center gap-2 flex-wrap">
 						{[1, 2, 3, 4, 5].map((rating) => (
@@ -347,7 +443,6 @@ function SurveyComponentInner() {
 				<p className="text-muted-foreground">
 					Your responses have been submitted successfully.
 				</p>
-                {/* Add link back to dashboard or elsewhere */}
                 <Button onClick={() => window.location.href = '/dashboard'} className="mt-4">Go to Dashboard</Button>
 			</div>
 		);
@@ -362,9 +457,16 @@ function SurveyComponentInner() {
                     <Loader2 className="h-3 w-3 animate-spin mr-1"/> Saving...
                 </div>
             )}
+            
+            {lastSaved && (
+                <div className="fixed top-4 left-4 z-50 text-xs text-gray-500 dark:text-gray-400">
+                    Last saved: {lastSaved.toLocaleTimeString()}
+                </div>
+            )}
+            
 			<div className="text-center mb-6 max-w-2xl">
 				<h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">{survey.title}</h1>
-                 {currentIndex > -1 && ( // Show description only on start screen? Or always?
+                 {currentIndex === -1 && ( // Show description only on start screen
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                         {survey.description}
                     </p>
@@ -459,14 +561,6 @@ function SurveyComponentInner() {
 					</CardFooter>
 				</Card>
 			)}
-
-            {/* Progress bar moved inside the CardFooter for question view */}
-            {/* {currentIndex > -1 && (
-                <Progress
-                    value={((currentIndex + 1) / (survey.questions.length || 1)) * 100}
-                    className="w-full max-w-2xl mt-6"
-                />
-            )} */}
 		</div>
 	);
 }

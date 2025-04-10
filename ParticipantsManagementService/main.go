@@ -4,8 +4,8 @@ import (
 	"log"
 	"os"
 
-	
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -55,12 +55,24 @@ func main() {
 	participantService := service.NewParticipantService(participantRepo)
 	participantHandler := handler.NewParticipantHandler(participantService)
 
-
 	// Setup Routes
 	// Initialize Fiber app instead of Gin
 	app := fiber.New()
 
-	
+	// Configure CORS
+	origins := "http://localhost:3000,https://your-production-domain.com"
+	if appEnv := os.Getenv("APP_ENV"); appEnv == "development" {
+		origins = "http://localhost:3000"
+	}
+
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     origins,
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowCredentials: true,
+		MaxAge:           86400, // Preflight cache duration (in seconds)
+	}))
+
 	// Setup Routes
 	routes.SetupParticipantRoutes(app, participantHandler)
 

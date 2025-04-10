@@ -18,7 +18,7 @@ export interface Question {
   id: number;
   survey_id: number;
   question_text: string;
-  question_type: 'multiple-choice' | 'text' | 'rating' | 'single-choice';
+  question_type: string;
   correct_answers: string;
   branching_logic: string;
   mandatory: boolean;

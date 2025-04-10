@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Survey, Question, ApiResponse } from './surveyService';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081'; // ParticipantsManagementService port
+const API_BASE_URL = process.env.NEXT_PUBLIC_PARTICIPANT_API_URL || 'http://localhost:8081'; // ParticipantsManagementService port
 
 // Types specific to the participant service
 export interface SurveySession {

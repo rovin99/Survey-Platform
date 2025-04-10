@@ -37,7 +37,7 @@ interface ApiResponse<T> {
 	roles: string[];
   }
   
-  const API_URL = "http://localhost:5171/api/auth";
+  const API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "http://localhost:5171/api/auth";
   
   export class AuthError extends Error {
 	constructor(

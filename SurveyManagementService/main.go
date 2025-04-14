@@ -15,11 +15,11 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	repository "github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
+	service "github.com/rovin99/Survey-Platform/SurveyManagementService/Service"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/handler"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/routes"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/service"
 )
 
 func setupDatabase() (*gorm.DB, error) {

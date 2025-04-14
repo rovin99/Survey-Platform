@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
 )
 
 type SurveyService interface {

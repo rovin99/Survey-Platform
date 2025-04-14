@@ -5,9 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
 )
 
 type AnswerService interface {

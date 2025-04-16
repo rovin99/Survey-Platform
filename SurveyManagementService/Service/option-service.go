@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
 )
 
 type OptionService interface {

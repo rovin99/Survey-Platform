@@ -1,9 +1,9 @@
 package service
+
 import (
 	"context"
-
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
 )
 
 type SessionService struct {

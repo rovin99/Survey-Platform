@@ -20,7 +20,7 @@ func NewAnswerHandler(answerService service.AnswerService) *AnswerHandler {
 type CreateAnswerRequest struct {
 	SessionID    uint   `json:"session_id" validate:"required"`
 	QuestionID   uint   `json:"question_id" validate:"required"`
-	ResponseData string `json:"response_data" validate:"required"`
+	Response string `json:"response" validate:"required"`
 }
 
 type BulkAnswerRequest struct {
@@ -37,7 +37,7 @@ func (h *AnswerHandler) CreateAnswer(c *fiber.Ctx) error {
 	answer := &models.Answer{
 		SessionID:    req.SessionID,
 		QuestionID:   req.QuestionID,
-		ResponseData: req.ResponseData,
+		Response: req.Response,
 	}
 
 	if err := h.answerService.CreateAnswer(c.Context(), answer); err != nil {
@@ -91,7 +91,7 @@ func (h *AnswerHandler) SubmitBulkAnswers(c *fiber.Ctx) error {
 		answers[i] = models.Answer{
 			SessionID:    req.SessionID,
 			QuestionID:   ans.QuestionID,
-			ResponseData: ans.ResponseData,
+			Response: ans.Response,
 		}
 	}
 

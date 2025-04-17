@@ -7,13 +7,29 @@ import (
 func SetupSurveyRoutes(app *fiber.App, handler *handler.SurveyHandler) {
 	surveyGroup := app.Group("/api/surveys")
 
-	
+	// Get survey progress
 	surveyGroup.Get("/:id/progress",
 		handler.GetProgress,
 	)
 
+	// Get survey details
 	surveyGroup.Get("/:id",
 		handler.GetSurvey,
+	)
+
+	// Get survey results
+	surveyGroup.Get("/:id/results",
+		handler.GetSurveyResults,
+	)
+
+	// Get survey summary
+	surveyGroup.Get("/:id/summary",
+		handler.GetSurveySummary,
+	)
+
+	// Get detailed results
+	surveyGroup.Get("/:id/detailed-results",
+		handler.GetDetailedResults,
 	)
 }
 

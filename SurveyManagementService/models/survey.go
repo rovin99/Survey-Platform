@@ -6,16 +6,17 @@ import (
 )
 
 type Survey struct {
-	SurveyID          uint                `json:"id" gorm:"primaryKey"`
-	ConductorID       uint                `json:"conductor_id"`
-	Title             string              `json:"title"`
-	Description       string              `json:"description"`
-	IsSelfRecruitment bool                `json:"is_self_recruitment"`
-	Status            string              `json:"status"`
+	tableName struct{} `gorm:"table:surveys"`
+	SurveyID          uint                `json:"survey_id" gorm:"column:survey_id;primaryKey"`
+	ConductorID       uint                `json:"conductor_id" gorm:"column:conductor_id"`
+	Title             string              `json:"title" gorm:"column:title"`
+	Description       string              `json:"description" gorm:"column:description"`
+	IsSelfRecruitment bool                `json:"is_self_recruitment" gorm:"column:is_self_recruitment"`
+	Status            string              `json:"status" gorm:"column:status"`
 	Questions         []Question          `json:"questions,omitempty" gorm:"foreignKey:SurveyID"`
 	Requirements      []SurveyRequirement `json:"requirements,omitempty" gorm:"foreignKey:SurveyID"`
-	CreatedAt         time.Time           `json:"created_at"`
-	UpdatedAt         time.Time           `json:"updated_at"`
+	CreatedAt         time.Time           `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time           `json:"updated_at" gorm:"column:updated_at"`
 }
 
 type Question struct {
@@ -51,12 +52,12 @@ type SurveyRequirement struct {
 }
 
 type Answer struct {
-    AnswerID    uint      `json:"id" gorm:"primaryKey"`
-    SessionID   uint      `json:"session_id"`
-    QuestionID  uint      `json:"question_id"`
-    ResponseData string   `json:"response_data"` // JSON string with appropriate structure for each question type
-    CreatedAt   time.Time `json:"created_at"`
-    UpdatedAt   time.Time `json:"updated_at"`
+    AnswerID    uint      `json:"id" gorm:"column:answer_id;primaryKey"`
+    SessionID   uint      `json:"session_id" gorm:"column:session_id"`
+    QuestionID  uint      `json:"question_id" gorm:"column:question_id"`
+    Response    string    `json:"response" gorm:"column:response"` // JSON string with appropriate structure for each question type
+    CreatedAt   time.Time `json:"created_at" gorm:"column:created_at"`
+    UpdatedAt   time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
 
 type SurveySession struct {

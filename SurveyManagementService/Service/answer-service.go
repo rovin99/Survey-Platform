@@ -136,7 +136,7 @@ func (s *answerService) ValidateAnswer(ctx context.Context, answer *models.Answe
 
 	// Validate response data is valid JSON
 	var jsonData interface{}
-	if err := json.Unmarshal([]byte(answer.ResponseData), &jsonData); err != nil {
+	if err := json.Unmarshal([]byte(answer.Response), &jsonData); err != nil {
 		return errors.New("invalid response data format: " + err.Error())
 	}
 

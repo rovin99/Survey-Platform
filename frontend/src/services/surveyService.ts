@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { SurveyResults } from '../types/survey-response';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_SURVEY_API_URL || 'http://localhost:3001';
 
@@ -60,5 +61,10 @@ export const surveyService = {
       surveyId,
       answers,
     });
+  },
+
+  async getSurveyResults(surveyId: string): Promise<SurveyResults> {
+    const response = await axios.get<ApiResponse<SurveyResults>>(`${API_BASE_URL}/api/surveys/${surveyId}/results`);
+    return response.data.data;
   },
 }; 

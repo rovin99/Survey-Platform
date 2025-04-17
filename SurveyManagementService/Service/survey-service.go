@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"sort"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/types"
 )
 
 type SurveyService interface {
@@ -25,6 +28,9 @@ type SurveyService interface {
 	GetDraft(ctx context.Context, draftID uint) (*models.SurveyDraft, error)
 	PublishDraftToSurvey(ctx context.Context, draftID uint) (uint, error)
 	GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error)
+	GetSurveyResults(ctx context.Context, surveyID uint) (*types.SurveyResults, error)
+	GetSurveySummary(ctx context.Context, surveyID uint) (*types.SurveySummary, error)
+	GetDetailedResults(ctx context.Context, surveyID uint) (*types.DetailedResults, error)
 }
 
 type SurveyProgress struct {
@@ -356,4 +362,195 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 
 func (s *surveyService) GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error) {
 	return s.surveyDraftRepo.GetLatestDraft(ctx, surveyID)
+}
+
+func (s *surveyService) GetSurveySummary(ctx context.Context, surveyID uint) (*types.SurveySummary, error) {
+	// Get the survey to verify it exists and get questions
+	log.Printf("[DEBUG] Service: Getting survey with ID: %d", surveyID)
+	survey, err := s.surveyRepo.GetByID(ctx, surveyID)
+	if err != nil {
+		log.Printf("[ERROR] Service: Failed to get survey: %v", err)
+		return nil, err
+	}
+
+	// Get all completed sessions for this survey
+	log.Printf("[DEBUG] Service: Getting completed sessions for survey %d", surveyID)
+	sessions, err := s.surveyRepo.GetCompletedSessions(ctx, surveyID)
+	if err != nil {
+		log.Printf("[ERROR] Service: Failed to get completed sessions: %v", err)
+		return nil, err
+	}
+
+	// Calculate total responses and average time
+	totalResponses := len(sessions)
+	var totalTimeSeconds float64
+
+	// Process timeline data
+	timelineMap := make(map[string]int)
+	for _, session := range sessions {
+		duration := session.UpdatedAt.Sub(session.CreatedAt)
+		totalTimeSeconds += duration.Seconds()
+
+		// Format date as YYYY-MM-DD for timeline
+		date := session.CreatedAt.Format("2006-01-02")
+		timelineMap[date]++
+	}
+
+	averageTimeSeconds := 0.0
+	if totalResponses > 0 {
+		averageTimeSeconds = totalTimeSeconds / float64(totalResponses)
+	}
+
+	// Convert timeline map to sorted array
+	timelineData := make([]types.TimelinePoint, 0)
+	for dateStr, count := range timelineMap {
+		date, _ := time.Parse("2006-01-02", dateStr)
+		timelineData = append(timelineData, types.TimelinePoint{
+			Date:      date.Format("2006-01-02"),
+			Responses: count,
+		})
+	}
+
+	// Sort timeline data by date
+	sort.Slice(timelineData, func(i, j int) bool {
+		return timelineData[i].Date < timelineData[j].Date
+	})
+
+	// Process demographic questions
+	var demographics types.SurveyDemographics
+
+	for _, question := range survey.Questions {
+		// Get all answers for this question
+		answers, err := s.surveyRepo.GetAnswersForQuestion(ctx, question.QuestionID)
+		if err != nil {
+			log.Printf("[ERROR] Service: Failed to get answers for question %d: %v", question.QuestionID, err)
+			return nil, err
+		}
+
+		// Process responses
+		responseMap := make(map[string]int)
+		for _, answer := range answers {
+			responseMap[answer.Response]++
+		}
+
+		// Convert to ResponseSummary array
+		responses := make([]types.ResponseSummary, 0)
+		for responseText, count := range responseMap {
+			percentage := float64(count) / float64(totalResponses) * 100
+			responses = append(responses, types.ResponseSummary{
+				ResponseText: responseText,
+				Count:        count,
+				Percentage:   percentage,
+			})
+		}
+
+		// Assign to appropriate demographic category
+		questionText := strings.ToLower(question.QuestionText)
+		switch {
+		case strings.Contains(questionText, "gender"):
+			demographics.Gender = responses
+		case strings.Contains(questionText, "location") || strings.Contains(questionText, "geography"):
+			demographics.Geography = responses
+		case strings.Contains(questionText, "age"):
+			demographics.AgeGroups = responses
+		}
+	}
+
+	// Construct final results
+	results := &types.SurveySummary{
+		TotalResponses:     totalResponses,
+		AverageTimeSeconds: averageTimeSeconds,
+		TimelineData:       timelineData,
+		Demographics:       demographics,
+	}
+
+	return results, nil
+}
+
+func (s *surveyService) GetDetailedResults(ctx context.Context, surveyID uint) (*types.DetailedResults, error) {
+	// Get the survey to verify it exists and get questions
+	survey, err := s.surveyRepo.GetByID(ctx, surveyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get all completed sessions for this survey
+	sessions, err := s.surveyRepo.GetCompletedSessions(ctx, surveyID)
+	if err != nil {
+		return nil, err
+	}
+
+	totalResponses := len(sessions)
+	questionResponses := make([]types.QuestionResponseStats, 0)
+
+	// Process each question
+	for _, question := range survey.Questions {
+		// Skip demographic questions
+		questionText := strings.ToLower(question.QuestionText)
+		if strings.Contains(questionText, "gender") ||
+			strings.Contains(questionText, "location") ||
+			strings.Contains(questionText, "geography") ||
+			strings.Contains(questionText, "age") {
+			continue
+		}
+
+		// Get all answers for this question
+		answers, err := s.surveyRepo.GetAnswersForQuestion(ctx, question.QuestionID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Process responses
+		responseMap := make(map[string]int)
+		for _, answer := range answers {
+			responseMap[answer.Response]++
+		}
+
+		// Convert to ResponseSummary array
+		responses := make([]types.ResponseSummary, 0)
+		for responseText, count := range responseMap {
+			percentage := float64(count) / float64(totalResponses) * 100
+			responses = append(responses, types.ResponseSummary{
+				ResponseText: responseText,
+				Count:        count,
+				Percentage:   percentage,
+			})
+		}
+
+		// Add question stats
+		questionResponses = append(questionResponses, types.QuestionResponseStats{
+			QuestionID:   question.QuestionID,
+			QuestionText: question.QuestionText,
+			QuestionType: question.QuestionType,
+			Responses:    responses,
+		})
+	}
+
+	// Construct final results
+	results := &types.DetailedResults{
+		TotalResponses:    totalResponses,
+		QuestionResponses: questionResponses,
+	}
+
+	return results, nil
+}
+
+func (s *surveyService) GetSurveyResults(ctx context.Context, surveyID uint) (*types.SurveyResults, error) {
+	// This method is kept for backward compatibility
+	// It combines both summary and detailed results
+	summary, err := s.GetSurveySummary(ctx, surveyID)
+	if err != nil {
+		return nil, err
+	}
+
+	detailed, err := s.GetDetailedResults(ctx, surveyID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.SurveyResults{
+		TotalResponses:     summary.TotalResponses,
+		AverageTimeSeconds: summary.AverageTimeSeconds,
+		QuestionResponses:  detailed.QuestionResponses,
+	}, nil
 }

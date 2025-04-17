@@ -14,6 +14,40 @@ type SurveyHandler struct {
 	surveyService service.SurveyService
 }
 
+func (h *SurveyHandler) GetSurveySummary(c *fiber.Ctx) error {
+	// Get survey ID from URL parameters
+	surveyID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid survey ID")
+	}
+	log.Printf("[DEBUG] Getting summary for survey ID: %d", surveyID)
+
+	// Get the survey summary using service
+	summary, err := h.surveyService.GetSurveySummary(c.Context(), uint(surveyID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get survey summary: "+err.Error())
+	}
+
+	return response.Success(c, summary, "Survey summary retrieved successfully")
+}
+
+func (h *SurveyHandler) GetDetailedResults(c *fiber.Ctx) error {
+	// Get survey ID from URL parameters
+	surveyID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid survey ID")
+	}
+	log.Printf("[DEBUG] Getting detailed results for survey ID: %d", surveyID)
+
+	// Get the detailed results using service
+	results, err := h.surveyService.GetDetailedResults(c.Context(), uint(surveyID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get detailed results: "+err.Error())
+	}
+
+	return response.Success(c, results, "Detailed results retrieved successfully")
+}
+
 func NewSurveyHandler(surveyService service.SurveyService) *SurveyHandler {
 	return &SurveyHandler{
 		surveyService: surveyService,
@@ -173,4 +207,21 @@ func (h *SurveyHandler) PublishDraft(c *fiber.Ctx) error {
 	return response.Success(c, fiber.Map{
 		"surveyId": surveyID,
 	}, "Survey published successfully")
+}
+
+func (h *SurveyHandler) GetSurveyResults(c *fiber.Ctx) error {
+	// Get survey ID from URL parameters
+	surveyID, err := c.ParamsInt("id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid survey ID")
+	}
+	log.Printf("[DEBUG] Getting results for survey ID: %d", surveyID)
+
+	// Get the survey results using service
+	results, err := h.surveyService.GetSurveyResults(c.Context(), uint(surveyID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get survey results: "+err.Error())
+	}
+
+	return response.Success(c, results, "Survey results retrieved successfully")
 }

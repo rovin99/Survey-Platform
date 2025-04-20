@@ -35,7 +35,7 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
 // Main component
 function SurveyComponentInner() { 
 	const searchParams = useSearchParams();
-	const surveyId = searchParams.get("id");
+	const surveyId = searchParams.get("id") || "4"; // Default to sample survey ID 4 for testing
 
 	const [survey, setSurvey] = useState<Survey | null>(null); 
     const [session, setSession] = useState<SurveySession | null>(null);

@@ -57,21 +57,31 @@ func main() {
 
 	// Setup Routes
 	// Initialize Fiber app instead of Gin
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			log.Printf("Error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"success": false,
+				"message": "An internal error occurred",
+				"error":   err.Error(),
+			})
+		},
+	})
 
 	// Configure CORS
-	origins := "http://localhost:3000,https://your-production-domain.com"
-	if appEnv := os.Getenv("APP_ENV"); appEnv == "development" {
-		origins = "http://localhost:3000"
-	}
-
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     origins,
-		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
-		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowOrigins:     "http://localhost:3000",
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,HEAD,PATCH",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-Requested-With",
 		AllowCredentials: true,
 		MaxAge:           86400, // Preflight cache duration (in seconds)
 	}))
+
+	// Add request logging middleware
+	app.Use(func(c *fiber.Ctx) error {
+		log.Printf("%s %s", c.Method(), c.Path())
+		return c.Next()
+	})
 
 	// Setup Routes
 	routes.SetupParticipantRoutes(app, participantHandler)

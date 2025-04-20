@@ -37,10 +37,11 @@ type ParticipantService interface {
 type participantServiceImpl struct {
 	repo repository.ParticipantRepository
 	// Potentially add clients for other services (e.g., survey service client) if needed
+	SURVEY_SERVICE_URL string // URL of the survey management service
 }
 
 func NewParticipantService(repo repository.ParticipantRepository) ParticipantService {
-	return &participantServiceImpl{repo: repo}
+	return &participantServiceImpl{repo: repo, SURVEY_SERVICE_URL: "http://localhost:3001"}
 }
 
 func (s *participantServiceImpl) StartOrResumeSurvey(ctx context.Context, surveyID, participantID uint) (*StartResumeResponse, error) {

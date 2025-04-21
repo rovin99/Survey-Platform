@@ -1,3 +1,5 @@
+using System;
+
 public class AuditLog
 {
     public int Id { get; set; }

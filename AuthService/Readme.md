@@ -455,3 +455,239 @@ kubectl logs <POD_NAME>
 kubectl delete deployment auth-service
 ```
 
+# Knative Serverless Deployment for Survey Microservices: AuthService
+
+This guide details how to deploy the `AuthService` microservice using Knative Serving for serverless capabilities (scale-to-zero, autoscaling) and expose it securely via the Kong API Gateway.
+
+## Table of Contents
+
+* [Prerequisites](#prerequisites)
+* [Configuration](#configuration)
+  * [Database Connection String](#database-connection-string)
+  * [Secrets and ConfigMaps](#secrets-and-configmaps)
+  * [Docker Image](#docker-image)
+  * [Knative Service](#knative-service)
+  * [Kong Ingress](#kong-ingress)
+* [Build and Push Docker Image](#build-and-push-docker-image)
+* [Deployment Steps](#deployment-steps)
+* [Verification and Testing](#verification-and-testing)
+  * [Check Deployment Status](#check-deployment-status)
+  * [Get Kong Gateway URL](#get-kong-gateway-url)
+  * [Test Scale-to-Zero](#test-scale-to-zero)
+  * [Test API Endpoint](#test-api-endpoint)
+  * [Test Autoscaling (Optional)](#test-autoscaling-optional)
+* [Cleanup](#cleanup)
+* [Troubleshooting](#troubleshooting)
+
+## Prerequisites
+
+1. **Kubernetes Cluster:** A running Kubernetes cluster (e.g., Minikube, Kind, GKE, EKS, AKS).
+2. **kubectl:** Configured to interact with your cluster (`kubectl cluster-info`).
+3. **Knative Serving:** Installed on your cluster. Follow the [official Knative installation guide](https://knative.dev/docs/install/). Verify with `kubectl get pods -n knative-serving`.
+4. **Kong Kubernetes Ingress Controller:** Installed on your cluster (typically in the `kong` namespace). Follow the [official Kong Ingress Controller documentation](https://docs.konghq.com/kubernetes-ingress-controller/latest/deployment/overview/). Verify with `kubectl get pods -n kong`. Ensure the Kong proxy service is accessible (usually type LoadBalancer).
+5. **Docker:** Installed locally for building the service image. Docker Hub account (or other registry) for pushing the image.
+6. **Database:** A PostgreSQL database accessible *from within* the Kubernetes cluster. You will need its service name/address, port, database name, username, and password. **Using `localhost` will not work.**
+
+## Configuration
+
+Before deploying, ensure you've updated the provided YAML files:
+
+### Database Connection String
+
+1. **File:** `secrets.yaml`
+2. **Key:** `CONNECTION_STRING`
+3. **Action:** Replace the placeholder value with your *actual* PostgreSQL connection string.
+   * **Host:** Use the Kubernetes service name (e.g., `postgres-service.database-namespace.svc.cluster.local`) or the external address if the DB is outside the cluster. **Do NOT use `localhost`**.
+   * **Password:** Include the correct password.
+   * **Example:** `Host=my-postgres.db.svc.cluster.local;Port=5432;Database=SurveyDb;Username=postgres;Password=YourSecretPassword`
+
+### Secrets and ConfigMaps
+
+1. **File:** `secrets.yaml`
+   * Ensure `JWT_KEY` has a strong, unique secret key.
+   * Contains the sensitive information like database connection string and JWT key.
+
+2. **File:** `config-map.yaml`
+   * Contains non-sensitive configuration like JWT issuer, audience, and duration settings.
+   * Contains the ASPNETCORE_ENVIRONMENT setting.
+
+### Docker Image
+
+1. **File:** `Dockerfile`
+   * A streamlined Dockerfile that builds the .NET application and creates a minimal runtime image.
+
+2. **File:** `k-native-service.yaml`
+   * **Key:** `spec.template.spec.containers[0].image`
+   * **Action:** Change `rovin123/auth-service:v1.0.0` to use your own specific, immutable tag that you will build and push (e.g., `your-dockerhub-username/auth-service:v1.0.0`).
+
+### Knative Service
+
+1. **File:** `k-native-service.yaml`
+   * Configured to use the proper container port (80) and ASPNETCORE_URLS.
+   * Configured for scale-to-zero functionality with autoscaling options.
+   * Properly injects environment variables from ConfigMap and Secrets.
+
+### Kong Ingress
+
+1. **File:** `kong-gateway.yaml`
+2. **Resource:** `kind: Ingress`, `metadata.name: auth-gateway`
+3. **Key:** `spec.rules[0].http.paths[0].backend.service.name`
+4. **Action:** Points to the Fully Qualified Domain Name (FQDN) of the stable Kubernetes service created by Knative: `auth-service.default.svc.cluster.local`
+
+## Build and Push Docker Image
+
+1. Navigate to the directory containing your `AuthService` project code and the updated `Dockerfile`.
+2. Build the image, replacing placeholders:
+   ```bash
+   docker build -t your-dockerhub-username/auth-service:your-tag .
+   # Example: docker build -t myuser/auth-service:v1.0.0 .
+   ```
+3. Log in to your Docker registry:
+   ```bash
+   docker login
+   # Or docker login your-private-registry.com
+   ```
+4. Push the image:
+   ```bash
+   docker push your-dockerhub-username/auth-service:your-tag
+   # Example: docker push myuser/auth-service:v1.0.0
+   ```
+
+## Deployment Steps
+
+Apply the configurations to your cluster in the following order. Ensure you are in the directory containing the YAML files. The `auth-service` will be deployed to the `default` namespace, and the Kong components are deployed to the `kong` namespace.
+
+```bash
+# 0. Create Kong Namespace (if not already done by Kong installation)
+kubectl apply -f kong-gateway.yaml # Applies the Namespace part first
+
+# 1. Apply AuthService Secret (ensure it's configured correctly!)
+kubectl apply -f secrets.yaml
+
+# 2. Apply AuthService ConfigMap
+kubectl apply -f config-map.yaml
+
+# 3. Apply Knative Service (ensure image tag is correct!)
+kubectl apply -f k-native-service.yaml
+
+# --- Wait for Knative service to be ready (optional, see verification) ---
+
+# 4. Apply Kong Rate Limiting Plugin (to kong namespace)
+# 5. Apply Kong Ingress (ensure backend service name is correct!)
+# 6. Apply Kong Proxy Service (if not already done by Kong installation)
+kubectl apply -f kong-gateway.yaml # Applies the remaining parts
+```
+
+## Verification and Testing
+
+### Check Deployment Status
+
+Check Knative Service:
+```bash
+kubectl get ksvc auth-service
+# Wait for READY=True
+```
+
+Check Pods: Initially, there might be no pods if traffic is zero.
+```bash
+kubectl get pods -l serving.knative.dev/service=auth-service
+```
+
+Check Kong Ingress:
+```bash
+kubectl get ingress auth-gateway -n kong
+```
+
+### Get Kong Gateway URL
+
+Find the external IP or hostname assigned to the kong-proxy service:
+```bash
+kubectl get service kong-proxy -n kong
+# Look for the EXTERNAL-IP (might take a minute to be assigned on cloud providers)
+# If using Minikube, you might need: minikube service kong-proxy -n kong --url
+```
+
+### Test Scale-to-Zero
+
+Wait for a period longer than the Knative scale-to-zero grace period (default is often 60 seconds).
+
+Check if the pods have terminated:
+```bash
+kubectl get pods -l serving.knative.dev/service=auth-service
+# Should show "No resources found"
+```
+
+### Test API Endpoint
+
+Make a request to your service through the Kong gateway. Replace `<KONG_EXTERNAL_IP>` and adjust the endpoint path as needed.
+
+```bash
+# Example: Test a login endpoint
+curl -k -X POST https://<KONG_EXTERNAL_IP>/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"username": "test", "password": "password"}'
+
+# The -k flag ignores certificate validation if using self-signed certs
+```
+
+After the first request, check the pods again. A new pod should have been created:
+```bash
+kubectl get pods -l serving.knative.dev/service=auth-service
+# Should show 1 pod running or creating
+```
+
+### Test Autoscaling (Optional)
+
+Use a load testing tool (like hey, k6, or siege) to send sustained traffic:
+
+```bash
+# Example using 'hey' (install it first)
+# Send 200 requests, 10 concurrently
+hey -n 200 -c 10 https://<KONG_EXTERNAL_IP>/api/auth/login
+```
+
+While the load test is running, monitor the number of pods:
+```bash
+watch kubectl get pods -l serving.knative.dev/service=auth-service
+```
+
+You should see the number of pods increase based on traffic (up to the maxScale limit). After the load stops, the pods should scale back down, eventually reaching zero.
+
+## Cleanup
+
+To remove the deployed resources:
+
+```bash
+# Delete resources in the application namespace
+kubectl delete ksvc auth-service
+kubectl delete secret auth-service-secrets
+kubectl delete configmap auth-service-config
+
+# Delete resources in the kong namespace
+kubectl delete ingress auth-gateway -n kong
+kubectl delete kongplugin rate-limiting -n kong
+
+# Optionally delete Kong namespace if you want to remove Kong entirely
+# kubectl delete namespace kong
+```
+
+## Troubleshooting
+
+* **ImagePullBackOff / ErrImagePull**: Check if the image name/tag in k-native-service.yaml is correct and exists in the registry. Check if your cluster has credentials to pull from the registry (if private).
+
+* **CrashLoopBackOff**: The pod is starting and crashing. Check logs: `kubectl logs <pod-name>`. Common causes:
+  * Incorrect connection string (cannot reach DB)
+  * Missing or incorrect environment variables
+  * Application error on startup
+  * Port mismatch (ensure app listens on port 80)
+
+* **503 Service Unavailable / 504 Gateway Timeout** (from Kong):
+  * Check if the Knative service auth-service is Ready (`kubectl get ksvc auth-service`)
+  * Verify the Kong Ingress backend.service.name points to the correct FQDN
+  * Check logs of the Knative activator or queue-proxy if pods aren't starting: `kubectl logs -n knative-serving -l app=activator`
+  * Check Kong proxy logs: `kubectl logs -n kong -l app=kong`
+
+* **Connection Refused** (in pod logs): Usually means the database connection string Host is incorrect or the database is not reachable from within the cluster.
+
+* **Scale-to-Zero Not Working**: Check Knative autoscaler configuration. Ensure no constant requests (even health checks not through Knative's endpoint) are keeping it alive.
+

@@ -4,8 +4,6 @@ metadata:
   name: auth-service-config
 data:
   ASPNETCORE_ENVIRONMENT: "Production"
-  CONNECTION_STRING: "Host=localhost;Port=5432;Database=SurveyDb;Username=postgres;Password=#roVin123"
-  JWT_KEY: "ThisIsASecretKeyWithAtLeast128Bits"
   JWT_ISSUER: "AuthService"
   JWT_AUDIENCE: "SurveyApp"
   JWT_DURATION: "60"

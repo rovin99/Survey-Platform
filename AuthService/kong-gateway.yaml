@@ -1,10 +1,10 @@
-# 1. Create the Kong Namespace (unchanged)
+# Kong Gateway YAML
 apiVersion: v1
 kind: Namespace
 metadata:
   name: kong
 ---
-# 2. Kong Rate Limiting Plugin (unchanged)
+# Kong Rate Limiting Plugin
 apiVersion: configuration.konghq.com/v1
 kind: KongPlugin
 metadata:
@@ -15,7 +15,7 @@ config:
   minute: 100
   policy: local
 ---
-# 3. Kong Ingress Configuration for Knative Auth Service
+# Kong Ingress Configuration for Knative Auth Service
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -35,17 +35,11 @@ spec:
         pathType: Prefix
         backend:
           service:
-            # Point to the Knative service's Kubernetes service
-            name: auth-service-00001      # Use the exact service name from your Knative deployment
+            name: auth-service
             port:
               number: 80
-          # Alternatively, use Knative's networking to route traffic
-          # service:
-          #   name: auth-service.default.svc.cluster.local  # Fully qualified domain name
-          #   port:
-          #     number: 80
 ---
-# 4. Kong Service Configuration (unchanged)
+# Kong Service Configuration
 apiVersion: v1
 kind: Service
 metadata:

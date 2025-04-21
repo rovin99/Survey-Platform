@@ -1,4 +1,9 @@
 // Middleware/AuditLoggingMiddleware.cs
+using System;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+
 public class AuditLoggingMiddleware
 {
     private readonly RequestDelegate _next;

@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json" // Needed for draft content handling
-	"fmt"
-
 	"errors"
 
 	"github.com/rovin99/Survey-Platform/ParticipantsManagementService/models"     // Adjust import path
@@ -67,29 +65,33 @@ func (s *participantServiceImpl) StartOrResumeSurvey(ctx context.Context, survey
 	// In a real implementation, this would be fetched from the Survey Management Service
 	mockSurvey := &MockSurvey{
 		ID:          surveyID,
-		Title:       "Sample Survey " + fmt.Sprintf("%d", surveyID),
-		Description: "This is a sample survey for testing",
+		Title:       "Student Demographics Survey",
+		Description: "A survey to understand student demographics at IITGN",
 		Questions: []MockQuestion{
 			{
-				ID:             1,
-				QuestionText:   "What is your favorite color?",
-				QuestionType:   "multiple-choice",
-				Mandatory:      true,
-				CorrectAnswers: "Red,Blue,Green,Yellow",
-			},
-			{
-				ID:           2,
-				QuestionText: "Please provide some feedback",
-				QuestionType: "text",
-				Mandatory:    false,
-			},
-			{
-				ID:           3,
-				QuestionText: "Rate your experience from 1-5",
-				QuestionType: "rating",
+				ID:           5,  // Actual ID from database
+				QuestionText: "What is your gender?",
+				QuestionType: "MULTIPLE_CHOICE",
 				Mandatory:    true,
+				CorrectAnswers: "Male,Female,Other",
+			},
+			{
+				ID:           6,  // Actual ID from database
+				QuestionText: "What is your age group?",
+				QuestionType: "MULTIPLE_CHOICE",
+				Mandatory:    true,
+				CorrectAnswers: "18-20,21-23,24-26,27+",
+			},
+			{
+				ID:           7,  // Actual ID from database
+				QuestionText: "Which state are you from?",
+				QuestionType: "MULTIPLE_CHOICE",
+				Mandatory:    true,
+				CorrectAnswers: "Gujarat,Maharashtra,Delhi,Tamil Nadu,Karnataka",
 			},
 		},
+		IsSelfRecruitment: true,
+		Status:            "PUBLISHED",
 	}
 
 	return &StartResumeResponse{

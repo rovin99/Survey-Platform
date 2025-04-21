@@ -67,6 +67,11 @@ function SurveyComponentInner() {
                 const result = await participantService.startOrResume(surveyId);
                 
                 console.log("Result from API:", result);
+                console.log("Survey questions with IDs:", result?.survey?.questions?.map(q => ({
+                    id: q.id,
+                    text: q.question_text,
+                    type: q.question_type
+                })));
                 
                 // Validate API response structure
                 if (!result) {
@@ -298,6 +303,12 @@ function SurveyComponentInner() {
 				    questionId: parseInt(questionIdStr, 10),
 				    responseData: value, // Send the raw value (string, number, array, etc.)
 			    }));
+
+			console.log('Submitting answers:', {
+				sessionId: session.id,
+				answers: answersToSubmit,
+				responses
+			});
 
 			await participantService.submitSurvey(session.id, answersToSubmit);
 			setHasSubmitted(true);

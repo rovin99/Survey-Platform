@@ -109,6 +109,28 @@ export const participantService = {
    */
   async submitSurvey(sessionId: number, answers: FinalAnswerInput[]): Promise<void> {
     try {
+      console.log('Making submit survey request:', {
+        url: `${API_BASE_URL}/api/participant/sessions/${sessionId}/submit`,
+        data: { answers }
+      });
+
+      // First verify the question IDs exist
+      const session = await this.getSession(sessionId.toString());
+      const validQuestionIds = session.survey.questions.map(q => q.id);
+      
+      // Check if all answer question IDs are valid
+      const invalidQuestionIds = answers
+        .map(a => a.questionId)
+        .filter(id => !validQuestionIds.includes(id));
+
+      if (invalidQuestionIds.length > 0) {
+        console.error('Invalid question IDs:', {
+          invalidIds: invalidQuestionIds,
+          validIds: validQuestionIds
+        });
+        throw new Error(`Invalid question IDs: ${invalidQuestionIds.join(', ')}`);
+      }
+
       await axios.post(
         `${API_BASE_URL}/api/participant/sessions/${sessionId}/submit`,
         {
@@ -117,6 +139,10 @@ export const participantService = {
       );
     } catch (error) {
       console.error('Error submitting survey:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Response:', error.response?.data);
+        console.error('Status:', error.response?.status);
+      }
       throw error;
     }
   },

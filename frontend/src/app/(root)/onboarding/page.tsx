@@ -162,9 +162,9 @@ export default function DashboardPage() {
 	// Handle form submission
 	const handleSubmit = () => {
 		if (role === "conductor") {
-			router.push("/conductor/dashboard");
+			router.push("/cdashboard");
 		} else {
-			router.push("/participant/dashboard");
+			router.push("/pdashboard");
 		}
 	};
 
@@ -172,15 +172,15 @@ export default function DashboardPage() {
 	const renderRoleSelection = () => (
 		<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 			<Card
-				className="border-2 cursor-pointer hover:border-gray-400 transition-all"
+				className="border-2 cursor-pointer hover:border-gray-400 transition-all dark:hover:border-gray-600"
 				onClick={() => handleRoleSelect("conductor")}
 			>
 				<CardHeader className="flex flex-row items-center justify-between pb-2">
 					<CardTitle className="text-xl">Conductor</CardTitle>
-					<UserCircle className="h-8 w-8 text-gray-700" />
+					<UserCircle className="h-8 w-8 text-gray-700 dark:text-gray-300" />
 				</CardHeader>
 				<CardContent>
-					<p className="text-sm text-gray-600">
+					<p className="text-sm text-gray-600 dark:text-gray-400">
 						Create and manage surveys, analyze responses, and pay participants
 						for their valuable input.
 					</p>
@@ -188,15 +188,15 @@ export default function DashboardPage() {
 			</Card>
 
 			<Card
-				className="border-2 cursor-pointer hover:border-gray-400 transition-all"
+				className="border-2 cursor-pointer hover:border-gray-400 transition-all dark:hover:border-gray-600"
 				onClick={() => handleRoleSelect("participant")}
 			>
 				<CardHeader className="flex flex-row items-center justify-between pb-2">
 					<CardTitle className="text-xl">Participant</CardTitle>
-					<Users className="h-8 w-8 text-gray-700" />
+					<Users className="h-8 w-8 text-gray-700 dark:text-gray-300" />
 				</CardHeader>
 				<CardContent>
-					<p className="text-sm text-gray-600">
+					<p className="text-sm text-gray-600 dark:text-gray-400">
 						Take part in surveys and get paid for sharing your opinions and
 						feedback.
 					</p>
@@ -229,9 +229,9 @@ export default function DashboardPage() {
 						id="conductor-photo"
 						type="file"
 						onChange={handleFileChange}
-						className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+						className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 dark:file:bg-gray-700 dark:file:text-gray-300"
 					/>
-					<Upload className="h-5 w-5 text-gray-500" />
+					<Upload className="h-5 w-5 text-gray-500 dark:text-gray-300" />
 				</div>
 			</div>
 
@@ -299,9 +299,9 @@ export default function DashboardPage() {
 						id="participant-photo"
 						type="file"
 						onChange={handleFileChange}
-						className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+						className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 dark:file:bg-gray-700 dark:file:text-gray-300"
 					/>
-					<Upload className="h-5 w-5 text-gray-500" />
+					<Upload className="h-5 w-5 text-gray-500 dark:text-gray-300" />
 				</div>
 			</div>
 
@@ -385,31 +385,38 @@ export default function DashboardPage() {
 
 	// Return appropriate step based on state
 	return (
-		<main className="min-h-screen bg-gray-50">
-			<div className="container mx-auto px-4 py-8">
-				<div className="max-w-xl mx-auto">
-					<Card>
-						<CardHeader>
-							<div className="flex items-center justify-between">
-								<CardTitle>
-									{step === "role" && "Choose Your Role"}
-									{step === "conductor" && "Complete Your Conductor Profile"}
-									{step === "participant" &&
-										"Complete Your Participant Profile"}
-								</CardTitle>
-								<Button variant="outline" size="sm" onClick={logout}>
-									Logout
-								</Button>
-							</div>
-						</CardHeader>
-						<CardContent>
-							{step === "role" && renderRoleSelection()}
-							{step === "conductor" && renderConductorForm()}
-							{step === "participant" && renderParticipantForm()}
-						</CardContent>
-					</Card>
+		<div className="container mx-auto px-4 py-8">
+			<div className="max-w-xl mx-auto">
+				<div className="flex justify-between items-center mb-8">
+					<h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+						{step === "role" && "Choose Your Role"}
+						{step === "conductor" && "Complete Your Conductor Profile"}
+						{step === "participant" &&
+							"Complete Your Participant Profile"}
+					</h1>
+					<Button variant="outline" onClick={logout}>
+						Logout
+					</Button>
 				</div>
+
+				<Card>
+					<CardHeader>
+						<div className="flex items-center justify-between">
+							<CardTitle>
+								{step === "role" && "Choose Your Role"}
+								{step === "conductor" && "Complete Your Conductor Profile"}
+								{step === "participant" &&
+									"Complete Your Participant Profile"}
+							</CardTitle>
+						</div>
+					</CardHeader>
+					<CardContent>
+						{step === "role" && renderRoleSelection()}
+						{step === "conductor" && renderConductorForm()}
+						{step === "participant" && renderParticipantForm()}
+					</CardContent>
+				</Card>
 			</div>
-		</main>
+		</div>
 	);
 }

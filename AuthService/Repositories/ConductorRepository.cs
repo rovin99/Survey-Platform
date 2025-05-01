@@ -22,14 +22,14 @@ namespace AuthService.Repositories
             return conductor;
         }
 
-        public async Task<Conductor> GetByIdAsync(int id)
+        public async Task<Conductor?> GetByIdAsync(int id)
         {
             return await _context.Conductors
                 .FirstOrDefaultAsync(c => c.ConductorId == id); 
         }
 
        
-        public async Task<Conductor> GetByUserIdAsync(int userId)
+        public async Task<Conductor?> GetByUserIdAsync(int userId)
         {
             return await _context.Conductors
                 .FirstOrDefaultAsync(c => c.UserId == userId);

@@ -107,6 +107,52 @@ namespace AuthService.Services
             return accessToken;
         }
 
+        public async Task<string> RefreshAccessTokenAsync(string currentToken)
+        {
+            if (string.IsNullOrEmpty(currentToken))
+            {
+                throw new Exception("Current access token is required");
+            }
+
+            try {
+                // Validate the current token (without checking expiration)
+                var tokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? throw new Exception("JWT key not configured"))),
+                    ValidateIssuer = true,
+                    ValidIssuer = _configuration["Jwt:Issuer"],
+                    ValidateAudience = true,
+                    ValidAudience = _configuration["Jwt:Audience"],
+                    ValidateLifetime = false, // Don't validate lifetime here
+                    ClockSkew = TimeSpan.Zero
+                };
+
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var principal = tokenHandler.ValidateToken(currentToken, tokenValidationParameters, out SecurityToken validatedToken);
+
+                // Extract user ID from the token
+                var userId = int.Parse(principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "0");
+                
+                // Get the user
+                var user = await _userRepository.GetByIdAsync(userId);
+                if (user == null)
+                {
+                    throw new Exception("User not found");
+                }
+
+                // Generate new tokens
+                var (accessToken, newRefreshToken) = GenerateTokens(user);
+                SetRefreshTokenCookie(newRefreshToken);
+
+                return accessToken;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Failed to refresh access token: {ex.Message}");
+            }
+        }
+
         public async Task LogoutAsync()
         {
             if (_httpContextAccessor.HttpContext != null)

@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
+import { apiService } from "@/services/api.service";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
@@ -44,7 +45,13 @@ export default function LoginPage() {
     setError("");
 
     try {
-      await login(formData.username, formData.password);
+      // Call the login method from auth context
+      const response = await login(formData.username, formData.password);
+      
+      // If login returns a CSRF token, set it in the API service
+      if (response?.csrfToken) {
+        apiService.setCSRFToken(response.csrfToken);
+      }
     } catch (err: any) {
       setError(err.message || "Invalid username or password");
     }

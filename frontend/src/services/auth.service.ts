@@ -28,6 +28,8 @@ interface ApiResponse<T> {
 	// user: UserResponse;
 	// accessToken: string;
 	token: string;
+  csrfToken?: string;
+  CsrfToken?: string; // Support both casing conventions
   }
   
   interface UserResponse {
@@ -35,6 +37,7 @@ interface ApiResponse<T> {
 	username: string;
 	email: string;
 	roles: string[];
+  csrfToken?: string; // For login/register responses
   }
   
   const API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "http://localhost:5171/api/auth";
@@ -55,16 +58,16 @@ interface ApiResponse<T> {
 	constructor() {
 	}
   
+	// Remove localStorage token storage
 	private setAccessToken(token: string) {
-		if (typeof window !== 'undefined') {
-			localStorage.setItem('access_token', token);
-		}
+	  // Token is now stored in HTTP-only cookies by the backend
+	  // No need to store it in localStorage
 	}
   
+	// Update to work with cookie-based authentication instead of localStorage
 	getAccessToken(): string | null {
-	  if (typeof window !== 'undefined') {
-		return localStorage.getItem('access_token');
-	  }
+	  // We don't have direct access to HTTP-only cookies in JavaScript
+	  // The token will be sent automatically with requests
 	  return null;
 	}
   
@@ -75,7 +78,7 @@ interface ApiResponse<T> {
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
-		credentials: 'include',
+		credentials: 'include', // Important for cookies
 		body: JSON.stringify(data),
 	  });
   
@@ -90,8 +93,8 @@ interface ApiResponse<T> {
 		);
 	  }
   
-	  this.setAccessToken(result.data.token);
-	  // localStorage.setItem('user_data', JSON.stringify(result.data.user));
+	  // Don't store token in localStorage anymore
+	  // Token will be in HTTP-only cookies set by the server
 	  return result;
 	}
   
@@ -103,7 +106,7 @@ interface ApiResponse<T> {
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
-		credentials: 'include',
+		credentials: 'include', // Important for cookies
 		body: JSON.stringify(data),
 	  });
 	
@@ -118,28 +121,24 @@ interface ApiResponse<T> {
 		);
 	  }
 	
-	  // Store the token
+	  // We need the parsed user data for the client-side context
 	  if (result.data.token) {
-		this.setAccessToken(result.data.token);
+		const userData = this.parseJwt(result.data.token);
 		
+		// Store user data in localStorage for client access
+		// but not the token itself (which is in HTTP-only cookies)
 		if (typeof window !== 'undefined') {
-		  // Parse the JWT to get user data
-		  const userData = this.parseJwt(result.data.token);
 		  localStorage.setItem('user_data', JSON.stringify({
 			userId: userData.sub,
 			email: userData.email,
 			roles: [userData['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']],
 		  }));
-		  
-		  // Set auth cookie
-		  document.cookie = `auth_token=${result.data.token}; path=/; max-age=86400; samesite=strict`;
 		}
 	  }
 	
 	  return result;
 	}
 	
-	// Add this helper method to parse JWT
 	private parseJwt(token: string) {
 	  try {
 		return JSON.parse(atob(token.split('.')[1]));
@@ -147,20 +146,15 @@ interface ApiResponse<T> {
 		return null;
 	  }
 	}
+
 	async isAuthenticated(): Promise<boolean> {
 	  try {
-		const token = this.getAccessToken();
-		if (!token) {
-		  return false;
-		}
-  
 		const response = await fetch(`${API_URL}/verify`, {
 		  method: 'GET',
 		  headers: {
 			'Accept': 'application/json',
-			'Authorization': `Bearer ${token}`
 		  },
-		  credentials: 'include',
+		  credentials: 'include', // Important for cookies
 		});
   
 		if (!response.ok) {
@@ -206,22 +200,19 @@ interface ApiResponse<T> {
 		  credentials: 'include',
 		  headers: {
 			'Accept': 'application/json',
-			'Authorization': `Bearer ${this.getAccessToken()}`
 		  },
 		});
 	  } catch (error) {
 		console.error('Logout error:', error);
 	  } finally {
-		// Always clear local storage and cookies
+		// Only clear local user data, not token (handled by server)
 		if (typeof window !== 'undefined') {
-		  localStorage.removeItem('access_token');
 		  localStorage.removeItem('user_data');
-		  document.cookie = 'auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
 		}
 	  }
 	}
   
-	async refreshToken(): Promise<void> {
+	async refreshToken(): Promise<ApiResponse<string>> {
 	  const response = await fetch(`${API_URL}/refresh-token`, {
 		method: 'POST',
 		credentials: 'include',
@@ -240,8 +231,9 @@ interface ApiResponse<T> {
 		  result.statusCode
 		);
 	  }
-  
-	  this.setAccessToken(result.data);
+	
+	  // No need to store token anymore as it's in HTTP-only cookies
+	  return result;
 	}
   
 	async forgotPassword(email: string): Promise<ApiResponse<null>> {

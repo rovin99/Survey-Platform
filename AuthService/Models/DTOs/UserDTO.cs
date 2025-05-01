@@ -13,6 +13,7 @@ namespace AuthService.Models.DTOs
         public DateTime UpdatedAt { get; set; }
         public List<string> Roles { get; set; }
         public string Token { get; set; }
+        public string? CsrfToken { get; set; }
 
         public static UserDTO FromUser(User user)
         {

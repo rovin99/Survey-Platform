@@ -11,13 +11,12 @@ metadata:
 spec:
   version: "1.12.0"
   ingress:
-    kourier:
-      enabled: true
+    
     istio:
-      enabled: false
+      enabled: true
   config:
     network:
-      ingress-class: "kourier.ingress.networking.knative.dev"
+      ingress-class: "istio.ingress.networking.knative.dev"
       auto-tls: "false"
       domain-template: "{{.Name}}.{{.Namespace}}.{{.Domain}}"
       domain: "example.com"

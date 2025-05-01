@@ -117,6 +117,31 @@ app.UseCors("AllowNextJS");
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.Use(async (context, next) =>
+{
+    // Security headers
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
+    context.Response.Headers.Append("Referrer-Policy", "no-referrer");
+    context.Response.Headers.Append("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none';");
+    context.Response.Headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    
+    await next();
+});
+
+// Update CORS middleware to be more restrictive and secure
+app.UseCors(options => options
+    .WithOrigins(
+        "http://localhost:3000", // NextJS development
+        "https://yourproductiondomain.com" // Production domain
+    )
+    .AllowCredentials() // Required for cookies
+    .WithHeaders("Content-Type", "Accept", "Authorization", "X-CSRF-Token")
+    .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+    .SetIsOriginAllowed(origin => true) // Replace with a stricter check in production
+);
+
 app.MapControllers();
 
 app.Run();

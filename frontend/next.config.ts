@@ -53,8 +53,11 @@ const nextConfig = {
 	},
 	// Enable experimental features if needed
 	experimental: {
-		// Enable server actions if you plan to use them
-		serverActions: true,
+		// Configure server actions properly
+		serverActions: {
+			allowedOrigins: ['localhost:3000'],
+			bodySizeLimit: '2mb'
+		},
 	},
 };
 

@@ -4,13 +4,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { authService } from '@/services/auth.service';
 import { useRouter } from 'next/navigation';
+import { apiService } from '@/services/api.service';
 
 interface AuthContextType {
   user: UserResponse | null;
   loading: boolean;
   error: string | null;
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<{ csrfToken?: string }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -48,15 +49,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Initialize authentication state
   useEffect(() => {
     const initAuth = async () => {
       try {
         const isAuthed = await authService.isAuthenticated();
         if (isAuthed) {
           await refreshUser();
+        } else {
+          // If not authenticated, ensure user state is cleared
+          setUser(null);
+          setIsAuthenticated(false);
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
+        setUser(null);
+        setIsAuthenticated(false);
       } finally {
         setLoading(false);
       }
@@ -64,20 +72,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initAuth();
   }, []);
-  // Add to AuthProvider
-useEffect(() => {
+
+  // Setup token refresh mechanism
+  useEffect(() => {
     let refreshInterval: NodeJS.Timeout;
   
     if (isAuthenticated) {
+      // Refresh every 14 minutes (assuming token lasts 15 minutes)
+      // This gives a 1-minute buffer before the token expires
       refreshInterval = setInterval(async () => {
         try {
-          await authService.refreshToken();
+          const response = await authService.refreshToken();
+          
+          // If the refresh returns a CSRF token, update it in the API service
+          if (response && typeof response === 'object' && 'data' in response) {
+            const csrfToken = response.data;
+            if (typeof csrfToken === 'string') {
+              apiService.setCSRFToken(csrfToken);
+            }
+          }
+          
           await refreshUser();
         } catch (error) {
           console.error('Token refresh failed:', error);
+          // If refresh fails, log the user out
           logout();
         }
-      }, 4 * 60 * 1000); // Refresh every 4 minutes
+      }, 14 * 60 * 1000); 
     }
   
     return () => {
@@ -86,13 +107,23 @@ useEffect(() => {
       }
     };
   }, [isAuthenticated]);
+
   const login = async (username: string, password: string) => {
     try {
       setError(null);
       setLoading(true);
       const response = await authService.login({ username, password });
       await refreshUser();
+      
+      // Return the CSRF token if available in the response
+      const csrfToken = response.data.CsrfToken || response.data.csrfToken;
+      if (csrfToken && typeof csrfToken === 'string') {
+        apiService.setCSRFToken(csrfToken);
+      }
+      
       router.push('/dashboard');
+      
+      return { csrfToken };
     } catch (err) {
       setError('Invalid credentials');
       throw err;
@@ -110,6 +141,9 @@ useEffect(() => {
     } catch (error) {
       console.error('Logout error:', error);
       setError('Logout failed');
+      // Even if server logout fails, clear local state
+      setUser(null);
+      setIsAuthenticated(false);
     }
   };
 

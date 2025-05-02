@@ -29,7 +29,32 @@ export default function LoginPage() {
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
-      router.push("/dashboard");
+      // Check if user is registered as conductor or participant
+      const checkUserRoles = async () => {
+        try {
+          // You might need to implement these endpoints in your API
+          const [conductorResponse, participantResponse] = await Promise.all([
+            apiService.get('/api/Conductor/current'),
+            apiService.get('/api/Participant/current')
+          ]);
+          
+          // Check if user has conductor or participant role by checking API responses
+          const isConductor = conductorResponse && Object.keys(conductorResponse).length > 0;
+          const isParticipant = participantResponse && Object.keys(participantResponse).length > 0;
+          
+          // If user has no roles yet, redirect to role selection
+          if (!isConductor && !isParticipant) {
+            router.push("/role-selection");
+          } else {
+            router.push("/dashboard");
+          }
+        } catch (error) {
+          // If API call fails, assume user needs to register roles
+          router.push("/role-selection");
+        }
+      };
+      
+      checkUserRoles();
     }
   }, [isAuthenticated, router]);
 

@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auth-service-migration
+  namespace: default
+  labels:
+    app: auth-service
+    component: migration
+spec:
+  template:
+    metadata:
+      labels:
+        app: auth-service
+        component: migration
+    spec:
+      containers:
+      - name: migrator
+        # Use your published image
+        image: rovin123/auth-service:v1
+        
+        # Override entrypoint to run migrations
+        command: ["dotnet", "ef", "database", "update"]
+        
+        # Load environment variables from ConfigMap and Secret
+        envFrom:
+          - configMapRef:
+              name: auth-service-config
+          - secretRef:
+              name: auth-service-secrets
+        
+        # Resource limits for the migration job
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+            
+      restartPolicy: OnFailure
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        
+  # Retry policy
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300  # Clean up job after 5 minutes 

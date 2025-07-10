@@ -1,0 +1,32 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+WORKDIR /src
+
+# Copy project file and restore dependencies
+COPY ["AuthService.csproj", "./"]
+RUN dotnet restore
+
+# Copy source code
+COPY . .
+
+# Create a simple seeder console app
+RUN cat > Program.Seeder.cs << 'EOF'
+using AuthService.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(Environment.GetEnvironmentVariable("CONNECTION_STRING")));
+
+var host = builder.Build();
+
+using var scope = host.Services.CreateScope();
+await DatabaseSeeder.SeedRolesAndUsers(scope.ServiceProvider);
+
+Console.WriteLine("Database seeding completed!");
+EOF
+
+# Build and run the seeder
+ENTRYPOINT ["dotnet", "run", "Program.Seeder.cs"] 

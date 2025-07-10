@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+  namespace: default
+data:
+  # ASP.NET Core Environment
+  ASPNETCORE_ENVIRONMENT: "Production"
+  
+  # JWT Configuration (non-sensitive)
+  JWT_ISSUER: "AuthService"
+  JWT_AUDIENCE: "SurveyApp"
+  JWT_DURATION: "60"
+  
+  # Email Service Configuration
+  EMAIL_SERVICE_BASE_URL: "http://email-service.default.svc.cluster.local"
+  EMAIL_SERVICE_TIMEOUT: "30"
+  
+  # Additional configuration  
+  CORS_ORIGINS: "https://your-frontend-domain.com,https://your-admin-panel.com"
+  
+  # Railway-specific settings
+  ASPNETCORE_ENVIRONMENT: "Production" 

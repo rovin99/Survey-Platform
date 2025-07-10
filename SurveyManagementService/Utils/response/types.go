@@ -1,6 +1,5 @@
 package response
 
-
 type ErrorDetail struct {
 	Message string      `json:"message"`
 	Code    string      `json:"code"`

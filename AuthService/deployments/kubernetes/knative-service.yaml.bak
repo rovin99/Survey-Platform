@@ -1,0 +1,96 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: default
+  labels:
+    app: auth-service
+spec:
+  template:
+    metadata:
+      annotations:
+        # Autoscaling configuration
+        autoscaling.knative.dev/target: "10"                    # Target concurrent requests per pod
+        autoscaling.knative.dev/minScale: "0"                   # Allow scale to zero
+        autoscaling.knative.dev/maxScale: "10"                  # Maximum number of pods
+        autoscaling.knative.dev/scaleDownDelay: "30s"           # Time to wait before scaling down
+        autoscaling.knative.dev/window: "60s"                   # Window for averaging metrics
+        
+        # Additional annotations for observability
+        run.googleapis.com/execution-environment: gen2         # For Google Cloud Run
+        
+      labels:
+        app: auth-service
+        version: v1
+        
+    spec:
+      # Container configuration
+      containers:
+      - name: auth-service
+        # Your application image
+        image: your-registry/auth-service:latest
+        
+        # Port configuration - Knative will inject PORT env var
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+          
+        # Environment variables from ConfigMap and Secret
+        envFrom:
+          - configMapRef:
+              name: auth-service-config
+          - secretRef:
+              name: auth-service-secrets
+              
+        # Additional environment variables
+        env:
+        - name: PORT
+          value: "8080"
+        - name: ASPNETCORE_URLS
+          value: "http://*:$(PORT)"
+          
+        # Resource limits and requests
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+            
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+          
+        # Startup probe for slower startup times
+        startupProbe:
+          httpGet:
+            path: /health/startup
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 10
+          
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        
+      # Container concurrency
+      containerConcurrency: 10 

@@ -4,6 +4,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"net/http"
 )
+	
 
 // Success creates a successful API response
 func Success(c *fiber.Ctx, data interface{}, message string, statusCode ...int) error {

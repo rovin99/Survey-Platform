@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DotNetEnv; // Add this
 using AuthService.Repositories;
+using AuthService.HealthChecks; // Add health checks
 using AuthService; // Adjust the namespace as necessary
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,6 +40,9 @@ builder.Services.AddScoped<IConductorService, ConductorService>();
 builder.Services.AddScoped<IConductorRepository, ConductorRepository>();
 builder.Services.AddScoped<IParticipantService, ParticipantService>();
 builder.Services.AddScoped<IParticipantRepository, ParticipantRepository>();
+
+// Add health checks
+builder.Services.AddCustomHealthChecks();
 
 // Configure PostgreSQL with Entity Framework Core
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -87,20 +91,20 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// // Call the seeder method
-// using (var scope = app.Services.CreateScope())
-// {
-//     var services = scope.ServiceProvider;
-//     try
-//     {
-//         await DatabaseSeeder.SeedRolesAndUsers(services);
-//     }
-//     catch (Exception ex)
-//     {
-//         // Handle exceptions
-//         Console.WriteLine($"An error occurred while seeding the database: {ex.Message}");
-//     }
-// }
+// Call the seeder method
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        await DatabaseSeeder.SeedRolesAndUsers(services);
+    }
+    catch (Exception ex)
+    {
+        // Handle exceptions
+        Console.WriteLine($"An error occurred while seeding the database: {ex.Message}");
+    }
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -143,5 +147,8 @@ app.UseCors(options => options
 );
 
 app.MapControllers();
+
+// Map health check endpoints
+app.MapCustomHealthChecks();
 
 app.Run();

@@ -1,7 +1,7 @@
 package response
 
 const (
-	ErrCodeValidation        = "VALIDATION_ERROR"
+	ErrCodeValidation = "VALIDATION_ERROR"
 	ErrCodeDatabase         = "DATABASE_ERROR"
 	ErrCodeAuthentication   = "AUTH_ERROR"
 	ErrCodeInvalidInput     = "INVALID_INPUT"

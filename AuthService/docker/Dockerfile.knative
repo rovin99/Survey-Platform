@@ -1,0 +1,31 @@
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy csproj and restore dependencies
+COPY ["AuthService.csproj", "./"]
+RUN dotnet restore
+
+# Copy everything else and build
+COPY . .
+RUN dotnet publish -c Release -o /app/publish
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+
+# Copy published files
+COPY --from=build /app/publish .
+
+# For Knative: Let the platform set the port via PORT env var
+# Remove fixed ASPNETCORE_URLS and let Knative inject PORT
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+# Create non-root user for security
+RUN adduser --disabled-password --gecos '' --shell /bin/sh --uid 1000 appuser
+USER appuser
+
+# Knative will inject PORT environment variable
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "AuthService.dll"] 

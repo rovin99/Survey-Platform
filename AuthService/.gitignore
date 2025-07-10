@@ -1,37 +1,63 @@
-
-# Ignore .env file
-.env
-
-# Ignore build outputs
+# Build artifacts
 bin/
 obj/
+out/
+*.dll
+*.exe
+*.pdb
+*.cache
 
-# Ignore user-specific files (e.g., Visual Studio)
-*.user
-*.rsuser
-*.suo
+# Environment files
+.env
+.env.local
+.env.*.local
 
-# Ignore package dependencies
-packages/
+# IDE/Editor files
+.vs/
 .vscode/
-
-# Ignore Rider-specific files
 .idea/
-.idea_modules/
-.idea/*
+*.swp
+*.swo
+*~
 
-# Ignore macOS-specific files
+# OS files
 .DS_Store
+Thumbs.db
 
-# Ignore logs and lock files
+# Package files
+*.nupkg
+*.snupkg
+packages/
+node_modules/
+
+# Logs
 *.log
-*.lock
+logs/
 
-# Ignore config.yaml
-configmap.yaml
+# Runtime files
+*.pid
+*.seed
+*.pid.lock
 
-# Ignore secrets.yaml
-secrets.yaml
+# Archive files
+*.zip
+*.tar.gz
+*.rar
 
-# Ignore DatabaseSeeders.cs
-DatabaseSeeders.cs
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Database files
+*.db
+*.sqlite
+
+# Docker
+.dockerignore
+
+
+/deployments/kubernetes/secrets.yaml
+/deployments/kubernetes/secrets.yaml.bak
+/deployments/docker-compose/

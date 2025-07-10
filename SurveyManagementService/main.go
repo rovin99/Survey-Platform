@@ -15,6 +15,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	middlewares "github.com/rovin99/Survey-Platform/SurveyManagementService/Middlewares"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/handler"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
@@ -177,12 +178,16 @@ func main() {
 	app.Use(logger.New())
 	app.Use(recover.New())
 
-	// Setup all routes
-	routes.SetupSurveyRoutes(app, handlers.SurveyHandler)
-	routes.SetupDraftRoutes(app, handlers.SurveyHandler)
-	routes.SetupQuestionRoutes(app, handlers.QuestionHandler)
-	routes.SetupOptionRoutes(app, handlers.OptionHandler)
-	routes.SetupAnswerRoutes(app, handlers.AnswerHandler)
+	// Create a new group for authenticated routes
+	api := app.Group("/api")
+	api.Use(middlewares.AuthMiddleware())
+
+	// Setup all routes under the authenticated group
+	routes.SetupSurveyRoutes(api, handlers.SurveyHandler)
+	routes.SetupDraftRoutes(api, handlers.SurveyHandler)
+	routes.SetupQuestionRoutes(api, handlers.QuestionHandler)
+	routes.SetupOptionRoutes(api, handlers.OptionHandler)
+	routes.SetupAnswerRoutes(api, handlers.AnswerHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {

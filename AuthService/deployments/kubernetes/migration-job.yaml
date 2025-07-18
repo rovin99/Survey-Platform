@@ -15,8 +15,8 @@ spec:
     spec:
       containers:
       - name: migrator
-        # Use your published image
-        image: rovin123/auth-service:v1
+        # Use the migrations-specific image with EF tools
+        image: rovin123/auth-service-migrations:v2
         
         # Override entrypoint to run migrations
         command: ["dotnet", "ef", "database", "update"]

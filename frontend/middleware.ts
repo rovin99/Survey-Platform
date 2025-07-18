@@ -3,41 +3,39 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
-  // Check for HTTP-only cookie set by the server
-  const accessToken = request.cookies.get('accessToken')?.value;
+  // Check for HTTP-only cookie set by the server (matches backend cookie name)
+  const authToken = request.cookies.get('auth_token')?.value || 
+                   request.cookies.get('accessToken')?.value ||
+                   request.cookies.get('.AspNetCore.Cookies')?.value;
+  
   const path = request.nextUrl.pathname;
 
-  // Protected routes
-  if (path.startsWith('/dashboard')) {
-    if (!accessToken) {
+  // Protected routes - require authentication
+  if (path.startsWith('/dashboard') || path.startsWith('/role-selection')) {
+    if (!authToken) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
   }
 
-  // Auth routes (login, register)
-  if ((path === '/login' || path === '/register') && accessToken) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
-  }
+  // Don't redirect authenticated users from auth pages
+  // Let the login page handle role-based redirects based on user data
+  // This prevents the redirect loop issue
 
-  // Clone the request headers and add the auth token if it exists
-  // This is needed for the client-side fetch API calls to backend services
+  // Clone the request headers
   const requestHeaders = new Headers(request.headers);
   
-  // Add CSRF protection header for non-GET requests
-  if (request.method !== 'GET') {
+  // For API routes, ensure CSRF token is present for non-GET requests
+  if (path.startsWith('/api') && request.method !== 'GET') {
     const csrfHeader = request.headers.get('X-CSRF-Token');
     const csrfCookie = request.cookies.get('csrf-token')?.value;
     
-    // If CSRF token is missing or doesn't match, block the request
-    // Note: In a real implementation, you would have a matching mechanism
-    // to create and validate these tokens
-    if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
-      if (path.startsWith('/api')) {
-        return NextResponse.json(
-          { error: 'CSRF token validation failed' },
-          { status: 403 }
-        );
-      }
+    // Both CSRF token and cookie must be present
+    // The actual validation should be done by the backend
+    if (!csrfHeader || !csrfCookie) {
+      return NextResponse.json(
+        { error: 'CSRF token required' },
+        { status: 403 }
+      );
     }
   }
 
@@ -47,4 +45,10 @@ export function middleware(request: NextRequest) {
       headers: requestHeaders,
     },
   });
+}
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+  ]
 }

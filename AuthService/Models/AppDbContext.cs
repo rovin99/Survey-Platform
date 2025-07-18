@@ -15,6 +15,7 @@ using AuthService.Models;
         public DbSet<UserRole> UserRoles { get; set; }
         public DbSet<Conductor> Conductors { get; set; }
         public DbSet<Participant> Participants { get; set; }
+        public DbSet<RefreshToken> RefreshTokens { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -54,5 +55,23 @@ using AuthService.Models;
             modelBuilder.Entity<Participant>()
                 .Property(p => p.ExperienceLevel)
                 .HasConversion<string>(); // Store enum as string
+
+            // Configure one-to-many User -> RefreshTokens
+            modelBuilder.Entity<RefreshToken>()
+                .HasOne(rt => rt.User)
+                .WithMany(u => u.RefreshTokens)
+                .HasForeignKey(rt => rt.UserId)
+                .IsRequired();
+
+            // Configure RefreshToken indexes for performance
+            modelBuilder.Entity<RefreshToken>()
+                .HasIndex(rt => rt.Token)
+                .IsUnique();
+
+            modelBuilder.Entity<RefreshToken>()
+                .HasIndex(rt => rt.UserId);
+
+            modelBuilder.Entity<RefreshToken>()
+                .HasIndex(rt => rt.ExpiresAt);
         }
     }

@@ -178,6 +178,76 @@ func main() {
 	app.Use(logger.New())
 	app.Use(recover.New())
 
+	// Health check endpoints for K-Native probes (no auth required)
+	app.Get("/health", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"status":    "healthy",
+			"service":   "survey-management-service",
+			"timestamp": time.Now().Unix(),
+		})
+	})
+
+	app.Get("/health/live", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"status":    "alive",
+			"timestamp": time.Now().Unix(),
+		})
+	})
+
+	app.Get("/health/ready", func(c *fiber.Ctx) error {
+		// Check database connectivity
+		sqlDB, err := db.DB()
+		if err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "not ready",
+				"error":  "database connection failed",
+			})
+		}
+
+		if err := sqlDB.Ping(); err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "not ready",
+				"error":  "database ping failed",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"status":    "ready",
+			"timestamp": time.Now().Unix(),
+		})
+	})
+
+	app.Get("/health/startup", func(c *fiber.Ctx) error {
+		// Comprehensive startup check
+		sqlDB, err := db.DB()
+		if err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "startup failed",
+				"error":  "database connection failed",
+			})
+		}
+
+		if err := sqlDB.Ping(); err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "startup failed",
+				"error":  "database ping failed",
+			})
+		}
+
+		// Check if migrations are applied (simple table existence check)
+		if err := db.Raw("SELECT 1 FROM surveys LIMIT 1").Error; err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "startup failed",
+				"error":  "database tables not ready",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"status":    "started",
+			"timestamp": time.Now().Unix(),
+		})
+	})
+
 	// Create a new group for authenticated routes
 	api := app.Group("/api")
 	api.Use(middlewares.AuthMiddleware())

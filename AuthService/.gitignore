@@ -61,3 +61,6 @@ temp/
 /deployments/kubernetes/secrets.yaml
 /deployments/kubernetes/secrets.yaml.bak
 /deployments/docker-compose/
+AuthService.Tests/
+authservice.log
+cookies.txt

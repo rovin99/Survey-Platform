@@ -9,6 +9,7 @@ namespace AuthService.Services
     {
         Task<ApiResponse<Participant>> RegisterParticipantAsync(int userId, ParticipantRegistrationRequest request);
         Task<ApiResponse<Participant>> GetByIdAsync(int id);
+        Task<ApiResponse<Participant>> GetByUserIdAsync(int userId);
         Task<ApiResponse<Participant>> UpdateParticipantAsync(int id, ParticipantUpdateRequest request);
         Task<ApiResponse<bool>> DeleteParticipantAsync(int id);
         Task<ApiResponse<(List<Participant> participants, int total)>> ListParticipantsAsync(int page, int limit);

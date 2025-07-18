@@ -21,7 +21,9 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { debounce } from 'perfect-debounce';
+import { useAuth } from "@/context/AuthContext";
 
+// Type definitions
 interface Question {
     id: string;
     text: string;
@@ -42,6 +44,29 @@ interface Option {
     text: string;
 }
 
+interface DraftQuestion {
+    question_id: number;
+    tempId?: string;
+    question_text: string;
+    question_type: string;
+    mandatory: boolean;
+    branching_logic: string;
+    correct_answers?: string;
+    mediaFiles?: Array<{
+        mediaId: number;
+        fileUrl: string;
+        fileType: string;
+        status: 'UPLOADING' | 'READY' | 'ERROR';
+    }>;
+}
+
+interface DraftOption {
+    optionId: string;
+    question_id: number;
+    questionTempId?: string;
+    option_text: string;
+}
+
 interface SurveyDraft {
     draftId?: number;
     surveyId?: number;
@@ -53,43 +78,68 @@ interface SurveyDraft {
             conductor_id: number;
             status: string;
         };
-        questions: Array<{
-            question_id: number;
-            question_text: string;
-            question_type: string;
-            mandatory: boolean;
-            branching_logic: string;
-            correct_answers?: string;
-            mediaFiles?: Array<{
-                mediaId: number;
-                fileUrl: string;
-                fileType: string;
-                status: 'UPLOADING' | 'READY' | 'ERROR';
-            }>;
-        }>;
-        options: Array<{
-            optionId: string;
-            question_id: number;
-            option_text: string;
-        }>;
+        questions: Array<DraftQuestion>;
+        options: Array<DraftOption>;
     };
     lastSaved: string;
     lastEditedQuestion?: string;
 }
 
+// Type for parsed draft data from localStorage
+interface ParsedDraftQuestion {
+    question_id?: number;
+    tempId?: string;
+    question_text: string;
+    question_type: string;
+    mandatory: boolean;
+    branching_logic: string;
+    correct_answers?: string;
+    options?: string[];
+    mediaFiles?: Array<{
+        mediaId: number;
+        fileUrl: string;
+        fileType: string;
+        status: 'UPLOADING' | 'READY' | 'ERROR';
+    }>;
+}
+
+interface ParsedDraftOption {
+    optionId: string;
+    question_id?: number;
+    questionTempId?: string;
+    option_text: string;
+}
+
+// Type for server response
+interface ServerResponse {
+    data?: {
+        draftId?: number;
+        surveyId?: number;
+    };
+    draftId?: number;
+    surveyId?: number;
+    [key: string]: unknown;
+}
+
 const STORAGE_KEY = 'currentSurveyDraft';
 const BACKUP_KEY = `${STORAGE_KEY}-backup`;
-
 const API_BASE_URL = 'http://localhost:3001'; // Backend API URL
+
+// Type for window with requestIdleCallback support
+type WindowWithIdleCallback = Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+};
 
 export default function SurveyCreatePage() {
     const router = useRouter();
+    const { user, isAuthenticated, loading } = useAuth();
     
     const [isLoading, setIsLoading] = useState(false);
     const [questions, setQuestions] = useState<Question[]>([]);
     const [currentSection, setCurrentSection] = useState<'basic' | 'questions' | 'branching'>('basic');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [lastSynced, setLastSynced] = useState<Date | null>(null);
+    const [conductorInfo, setConductorInfo] = useState<{ conductorId: number } | null>(null);
     
     // Initialize draft state
     const [draft, setDraft] = useState<SurveyDraft>({
@@ -99,7 +149,7 @@ export default function SurveyCreatePage() {
                 description: '',
                 is_self_recruitment: false,
                 status: 'DRAFT',
-                conductor_id: 1
+                conductor_id: 0 // Will be set after loading conductor info
             },
             questions: [],
             options: []
@@ -107,14 +157,10 @@ export default function SurveyCreatePage() {
         lastSaved: new Date().toISOString()
     });
 
-    // Debug whenever draft state changes
-    useEffect(() => {
-        console.log('Draft state updated:', { 
-            draftId: draft.draftId, 
-            questionsCount: draft.draftContent.questions.length,
-            hasTitle: !!draft.draftContent.basicInfo.title
-        });
-    }, [draft]);
+    // Track if a sync is in progress
+    const isSyncingRef = useRef(false);
+    // Track the latest draft that needs to be synced
+    const pendingDraftRef = useRef<SurveyDraft | null>(null);
 
     // Utility function to save to localStorage without triggering sync
     const saveToLocalStorage = (draftToSave: SurveyDraft, key = STORAGE_KEY) => {
@@ -133,7 +179,7 @@ export default function SurveyCreatePage() {
             };
             
             if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-                (window as any).requestIdleCallback(saveOperation, { timeout: 1000 });
+                (window as WindowWithIdleCallback).requestIdleCallback?.(saveOperation, { timeout: 1000 });
             } else {
                 setTimeout(saveOperation, 0);
             }
@@ -143,137 +189,28 @@ export default function SurveyCreatePage() {
         }
     };
 
-    // Create a backup of the draft periodically
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (draft.draftId) {
-                saveToLocalStorage(draft, BACKUP_KEY);
-            }
-        }, 5 * 60 * 1000); // Every 5 minutes
+    // Function to find draft ID in server response
+    const findDraftIdInResponse = (obj: ServerResponse): number | null => {
+        if (!obj || typeof obj !== 'object') return null;
         
-        return () => clearInterval(interval);
-    }, [draft]);
-
-    // Load draft from localStorage on mount
-    useEffect(() => {
-        try {
-            // Try to load from localStorage
-            const savedDraft = localStorage.getItem(STORAGE_KEY);
-            if (savedDraft) {
-                const parsed = JSON.parse(savedDraft);
-                console.log("Loaded draft from localStorage:", parsed);
-                if (parsed.draftId) {
-                    console.log("Draft ID from localStorage:", parsed.draftId);
-                }
-                
-                // If the old format doesn't have options array, create it
-                if (!parsed.draftContent.options) {
-                    parsed.draftContent.options = [];
-                    
-                    // Move options from questions to the separate array
-                    parsed.draftContent.questions.forEach((q: {
-                        tempId?: string;
-                        question_id?: number;
-                        options?: string[];
-                    }) => {
-                        if (q.options) {
-                            // Handle both old format (tempId) and new format (question_id)
-                            const questionId = q.question_id || parseInt(q.tempId || "0");
-                            q.options.forEach((optText: string, idx: number) => {
-                                parsed.draftContent.options.push({
-                                    optionId: `${questionId}-opt-${idx}`,
-                                    question_id: questionId,
-                                    option_text: optText
-                                });
-                            });
-                            // Remove options from question object
-                            delete q.options;
-                        }
-                        
-                        // Convert any tempId to question_id if needed
-                        if (q.tempId && !q.question_id) {
-                            q.question_id = parseInt(q.tempId) || q.question_id;
-                            delete q.tempId;
-                        }
-                    });
-                }
-                
-                // Convert any remaining tempId to question_id in questions array
-                if (parsed.draftContent.questions.length > 0) {
-                    parsed.draftContent.questions = parsed.draftContent.questions.map((q: any) => {
-                        if (q.tempId && !q.question_id) {
-                            return {
-                                ...q,
-                                question_id: parseInt(q.tempId) || parsed.draftContent.questions.indexOf(q) + 1,
-                                tempId: undefined
-                            };
-                        }
-                        return q;
-                    });
-                }
-                
-                // Convert any questionTempId to question_id in options array
-                if (parsed.draftContent.options.length > 0) {
-                    parsed.draftContent.options = parsed.draftContent.options.map((opt: any) => {
-                        if (opt.questionTempId && !opt.question_id) {
-                            return {
-                                ...opt,
-                                question_id: parseInt(opt.questionTempId) || 0,
-                                questionTempId: undefined
-                            };
-                        }
-                        return opt;
-                    });
-                }
-                
-                setDraft(parsed);
-                
-                // Also sync questions state
-                if (parsed.draftContent.questions.length > 0) {
-                    // Transform draft questions to Question interface
-                    const loadedQuestions = parsed.draftContent.questions.map((q: any) => {
-                        // Find options for this question
-                        const questionOptions = parsed.draftContent.options
-                            .filter((opt: any) => opt.question_id === q.question_id)
-                            .map((opt: any, idx: number) => ({
-                                id: opt.optionId || `${q.question_id}-opt-${idx}`,
-                                text: opt.option_text
-                            }));
-                        
-                        return {
-                            id: q.question_id.toString(),
-                            text: q.question_text,
-                            type: q.question_type as any,
-                            mandatory: q.mandatory || false,
-                            correctAnswers: q.correct_answers || "",
-                            options: questionOptions,
-                            mediaFiles: q.mediaFiles?.map((m: any) => ({
-                                id: m.mediaId.toString(),
-                                url: m.fileUrl,
-                                type: m.fileType,
-                                status: m.status as any
-                            }))
-                        };
-                    });
-                    setQuestions(loadedQuestions);
-                }
+        // Direct check for draftId (case sensitive and insensitive)
+        if ('draftId' in obj && typeof obj.draftId === 'number') return obj.draftId;
+        if ('draft_id' in obj && typeof obj.draft_id === 'number') return obj.draft_id as number;
+        
+        // Search for any property containing 'draft' and 'id'
+        for (const key in obj) {
+            const lowerKey = key.toLowerCase();
+            if (lowerKey.includes('draft') && lowerKey.includes('id') && typeof obj[key] === 'number') {
+                return obj[key] as number;
             }
-        } catch (error) {
-            console.error('Error loading draft:', error);
-            toast.error("Failed to load saved draft");
             
-            // Try to recover by checking if there's a backup
-            const backupDraft = localStorage.getItem(BACKUP_KEY);
-            if (backupDraft) {
-                try {
-                    setDraft(JSON.parse(backupDraft));
-                    toast.success("Recovered from backup draft");
-                } catch {
-                    // If backup also fails, just continue with new draft
-                }
+            if (typeof obj[key] === 'object' && obj[key] !== null) {
+                const found = findDraftIdInResponse(obj[key] as ServerResponse);
+                if (found) return found;
             }
         }
-    }, []);
+        return null;
+    };
 
     // Sync with backend
     const syncWithBackend = async (draftData: SurveyDraft) => {
@@ -309,7 +246,9 @@ export default function SurveyCreatePage() {
         draftData.draftContent.questions.forEach((question, index) => {
             const originalId = question.question_id;
             const normalizedId = index + 1; // Start with 1
-            questionIdMap.set(originalId, normalizedId);
+            if (originalId !== undefined) {
+                questionIdMap.set(originalId, normalizedId);
+            }
         });
         
         // Transform data to match backend schema
@@ -353,9 +292,6 @@ export default function SurveyCreatePage() {
             
             // Only use PUT if we have a valid draft ID that was previously saved
             if (validDraftId) {
-                // OPTION 1: Check if draft exists by making a request
-                // Uncomment this block if your backend supports draft existence checks
-                
                 try {
                     // First try with HEAD request (lightweight)
                     let checkResponse = await fetch(`${API_BASE_URL}/api/v1/drafts/${validDraftId}`, {
@@ -385,9 +321,6 @@ export default function SurveyCreatePage() {
                     // Reset the draftId since we couldn't verify it
                     draftData.draftId = undefined;
                 }
-                
-                
-                
             } else {
                 console.log('No valid draft ID found, using POST method');
             }
@@ -410,7 +343,7 @@ export default function SurveyCreatePage() {
 
             if (!response.ok) throw new Error('Failed to sync with server');
 
-            const result = await response.json();
+            const result: ServerResponse = await response.json();
             console.log('Server response:', result);
             console.log('Response data.draftId:', result.data?.draftId);
             
@@ -438,29 +371,7 @@ export default function SurveyCreatePage() {
             // Fallback to deep search only if needed
             else {
                 console.log('Searching for draftId in response...');
-                const findDraftId = (obj: any): number | null => {
-                    if (!obj || typeof obj !== 'object') return null;
-                    
-                    // Direct check for draftId (case sensitive and insensitive)
-                    if ('draftId' in obj) return obj.draftId;
-                    if ('draft_id' in obj) return obj.draft_id;
-                    
-                    // Search for any property containing 'draft' and 'id'
-                    for (const key in obj) {
-                        const lowerKey = key.toLowerCase();
-                        if (lowerKey.includes('draft') && lowerKey.includes('id') && typeof obj[key] === 'number') {
-                            return obj[key];
-                        }
-                        
-                        if (typeof obj[key] === 'object') {
-                            const found: number | null = findDraftId(obj[key]);
-                            if (found) return found;
-                        }
-                    }
-                    return null;
-                };
-                
-                draftIdFromResponse = findDraftId(result);
+                draftIdFromResponse = findDraftIdInResponse(result);
                 if (draftIdFromResponse) {
                     console.log('Found draftId in nested structure:', draftIdFromResponse);
                 }
@@ -538,7 +449,7 @@ export default function SurveyCreatePage() {
                     });
 
                     if (retryResponse.ok) {
-                        const retryResult = await retryResponse.json();
+                        const retryResult: ServerResponse = await retryResponse.json();
                         console.log('Retry result:', retryResult);
                         
                         // Find draftId using the same robust approach as the main function
@@ -556,27 +467,7 @@ export default function SurveyCreatePage() {
                         }
                         // Deep search as last resort
                         else {
-                            const findDraftId = (obj: any): number | null => {
-                                if (!obj || typeof obj !== 'object') return null;
-                                if ('draftId' in obj) return obj.draftId;
-                                if ('draft_id' in obj) return obj.draft_id;
-                                
-                                // Search for properties containing 'draft' and 'id'
-                                for (const key in obj) {
-                                    const lowerKey = key.toLowerCase();
-                                    if (lowerKey.includes('draft') && lowerKey.includes('id') && typeof obj[key] === 'number') {
-                                        return obj[key];
-                                    }
-                                    
-                                    if (typeof obj[key] === 'object') {
-                                        const found: number | null = findDraftId(obj[key]);
-                                        if (found) return found;
-                                    }
-                                }
-                                return null;
-                            };
-                            
-                            retryDraftId = findDraftId(retryResult);
+                            retryDraftId = findDraftIdInResponse(retryResult);
                         }
                         
                         if (!retryDraftId && retryMethod === 'POST') {
@@ -610,11 +501,6 @@ export default function SurveyCreatePage() {
             throw error;
         }
     };
-
-    // Track if a sync is in progress
-    const isSyncingRef = useRef(false);
-    // Track the latest draft that needs to be synced
-    const pendingDraftRef = useRef<SurveyDraft | null>(null);
 
     // Function to process any pending drafts
     const processPendingDraft = useCallback(async () => {
@@ -656,12 +542,217 @@ export default function SurveyCreatePage() {
         return () => {
             // The perfect-debounce library doesn't expose a cancel method directly on the type
             // but it does exist at runtime, so we need to use this approach
-            const debouncedFn = queueDraftForSync as any;
+            const debouncedFn = queueDraftForSync as { cancel?: () => void };
             if (debouncedFn && typeof debouncedFn.cancel === 'function') {
                 debouncedFn.cancel();
             }
         };
+    }, [queueDraftForSync]);
+
+    // Create a backup of the draft periodically
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (draft.draftId) {
+                saveToLocalStorage(draft, BACKUP_KEY);
+            }
+        }, 5 * 60 * 1000); // Every 5 minutes
+        
+        return () => clearInterval(interval);
+    }, [draft]);
+
+    // Load draft from localStorage on mount
+    useEffect(() => {
+        try {
+            // Try to load from localStorage
+            const savedDraft = localStorage.getItem(STORAGE_KEY);
+            if (savedDraft) {
+                const parsed = JSON.parse(savedDraft);
+                console.log("Loaded draft from localStorage:", parsed);
+                if (parsed.draftId) {
+                    console.log("Draft ID from localStorage:", parsed.draftId);
+                }
+                
+                // If the old format doesn't have options array, create it
+                if (!parsed.draftContent.options) {
+                    parsed.draftContent.options = [];
+                    
+                    // Move options from questions to the separate array
+                    parsed.draftContent.questions.forEach((q: ParsedDraftQuestion) => {
+                        if (q.options) {
+                            // Handle both old format (tempId) and new format (question_id)
+                            const questionId = q.question_id || parseInt(q.tempId || "0");
+                            q.options.forEach((optText: string, idx: number) => {
+                                parsed.draftContent.options.push({
+                                    optionId: `${questionId}-opt-${idx}`,
+                                    question_id: questionId,
+                                    option_text: optText
+                                });
+                            });
+                            // Remove options from question object
+                            delete q.options;
+                        }
+                        
+                        // Convert any tempId to question_id if needed
+                        if (q.tempId && !q.question_id) {
+                            q.question_id = parseInt(q.tempId) || q.question_id;
+                            delete q.tempId;
+                        }
+                    });
+                }
+                
+                // Convert any remaining tempId to question_id in questions array
+                if (parsed.draftContent.questions.length > 0) {
+                    parsed.draftContent.questions = parsed.draftContent.questions.map((q: ParsedDraftQuestion, index: number) => {
+                        if (q.tempId && !q.question_id) {
+                            return {
+                                ...q,
+                                question_id: parseInt(q.tempId) || index + 1,
+                                tempId: undefined
+                            };
+                        }
+                        return q;
+                    });
+                }
+                
+                // Convert any questionTempId to question_id in options array
+                if (parsed.draftContent.options.length > 0) {
+                    parsed.draftContent.options = parsed.draftContent.options.map((opt: ParsedDraftOption) => {
+                        if (opt.questionTempId && !opt.question_id) {
+                            return {
+                                ...opt,
+                                question_id: parseInt(opt.questionTempId) || 0,
+                                questionTempId: undefined
+                            };
+                        }
+                        return opt;
+                    });
+                }
+                
+                setDraft(parsed);
+                
+                // Also sync questions state
+                if (parsed.draftContent.questions.length > 0) {
+                    // Transform draft questions to Question interface
+                    const loadedQuestions = parsed.draftContent.questions.map((q: ParsedDraftQuestion) => {
+                        // Find options for this question
+                        const questionOptions = parsed.draftContent.options
+                            .filter((opt: ParsedDraftOption) => opt.question_id === q.question_id)
+                            .map((opt: ParsedDraftOption, idx: number) => ({
+                                id: opt.optionId || `${q.question_id}-opt-${idx}`,
+                                text: opt.option_text
+                            }));
+                        
+                        return {
+                            id: (q.question_id || 1).toString(),
+                            text: q.question_text,
+                            type: q.question_type as Question['type'],
+                            mandatory: q.mandatory || false,
+                            correctAnswers: q.correct_answers || "",
+                            options: questionOptions,
+                            mediaFiles: q.mediaFiles?.map((m) => ({
+                                id: m.mediaId.toString(),
+                                url: m.fileUrl,
+                                type: m.fileType,
+                                status: m.status
+                            }))
+                        };
+                    });
+                    setQuestions(loadedQuestions);
+                }
+            }
+        } catch (error) {
+            console.error('Error loading draft:', error);
+            toast.error("Failed to load saved draft");
+            
+            // Try to recover by checking if there's a backup
+            const backupDraft = localStorage.getItem(BACKUP_KEY);
+            if (backupDraft) {
+                try {
+                    setDraft(JSON.parse(backupDraft));
+                    toast.success("Recovered from backup draft");
+                } catch {
+                    // If backup also fails, just continue with new draft
+                }
+            }
+        }
     }, []);
+
+    // Authorization and conductor data loading
+    useEffect(() => {
+        const loadConductorInfo = async () => {
+            if (!loading && isAuthenticated && user) {
+                // Check if user has Conducting role
+                if (!user.roles?.includes("Conducting")) {
+                    toast.error("Access denied. Conducting role required.");
+                    router.push("/role-selection");
+                    return;
+                }
+
+                try {
+                    // Get current conductor information
+                    const response = await fetch(`http://localhost:5171/api/Conductor/current`, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        credentials: 'include',
+                    });
+
+                    if (response.ok) {
+                        const conductorData = await response.json();
+                        setConductorInfo({ conductorId: conductorData.conductorId });
+                        
+                        // Update draft with correct conductor_id
+                        setDraft(prevDraft => ({
+                            ...prevDraft,
+                            draftContent: {
+                                ...prevDraft.draftContent,
+                                basicInfo: {
+                                    ...prevDraft.draftContent.basicInfo,
+                                    conductor_id: conductorData.conductorId
+                                }
+                            }
+                        }));
+                    } else {
+                        toast.error("Failed to load conductor information");
+                        router.push("/role-selection");
+                    }
+                } catch (error) {
+                    console.error("Error loading conductor info:", error);
+                    toast.error("Failed to load conductor information");
+                    router.push("/role-selection");
+                }
+            }
+        };
+
+        loadConductorInfo();
+    }, [user, isAuthenticated, loading, router]);
+
+    // Debug whenever draft state changes
+    useEffect(() => {
+        console.log('Draft state updated:', { 
+            draftId: draft.draftId, 
+            questionsCount: draft.draftContent.questions.length,
+            hasTitle: !!draft.draftContent.basicInfo.title
+        });
+    }, [draft]);
+
+    // Don't render if not authorized or still loading conductor info
+    if (loading || !isAuthenticated || !user?.roles?.includes("Conducting") || !conductorInfo) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <p className="text-lg">Loading...</p>
+                    {!loading && !isAuthenticated && (
+                        <p className="text-sm text-gray-500 mt-2">Please log in to continue</p>
+                    )}
+                    {!loading && isAuthenticated && !user?.roles?.includes("Conducting") && (
+                        <p className="text-sm text-red-500 mt-2">Conducting role required</p>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     // Save to localStorage and trigger backend sync
     const saveDraft = (updatedDraft: SurveyDraft) => {
@@ -997,9 +1088,10 @@ export default function SurveyCreatePage() {
             localStorage.removeItem(BACKUP_KEY);
             toast.success("Survey published successfully!");
             router.push('/surveys');
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Publishing failed:', error);
-            toast.error(`Failed to publish survey: ${error.message || "Unknown error"}`);
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            toast.error(`Failed to publish survey: ${errorMessage}`);
         } finally {
             setIsSubmitting(false);
         }
@@ -1008,7 +1100,7 @@ export default function SurveyCreatePage() {
     const addQuestion = () => {
         // Get the next sequential question ID
         const nextQuestionId = draft.draftContent.questions.length > 0 
-            ? Math.max(...draft.draftContent.questions.map(q => q.question_id)) + 1
+            ? Math.max(...draft.draftContent.questions.map(q => q.question_id).filter(id => id !== undefined)) + 1
             : 1;
         
         const optionId = `${nextQuestionId}-opt-0`;
@@ -1129,7 +1221,7 @@ export default function SurveyCreatePage() {
     const handleManualSave = async () => {
         try {
             // Cancel any pending debounced saves
-            const debouncedFn = queueDraftForSync as any;
+            const debouncedFn = queueDraftForSync as { cancel?: () => void };
             if (debouncedFn && typeof debouncedFn.cancel === 'function') {
                 debouncedFn.cancel();
             }
@@ -1285,12 +1377,12 @@ export default function SurveyCreatePage() {
                                     <div className="flex justify-between items-center">
                                         <Select 
                                             defaultValue={question.type}
-                                            onValueChange={(value) => {
+                                            onValueChange={(value: Question['type']) => {
                                                 // Update UI state
                                                 setQuestions(
                                                     questions.map((q) =>
                                                         q.id === question.id
-                                                            ? { ...q, type: value as any }
+                                                            ? { ...q, type: value }
                                                             : q,
                                                     )
                                                 );

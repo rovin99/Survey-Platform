@@ -6,7 +6,7 @@ interface ApiResponse<T> {
 	error: {
 	  message: string;
 	  code: string;
-	  details: any;
+	  details: unknown;
 	} | null;
 	statusCode: number;
 	success: boolean;
@@ -23,6 +23,22 @@ interface ApiResponse<T> {
 	username: string;
 	password: string;
   }
+
+  interface ConductorRegistrationRequest {
+	name: string;
+	conductorType: number;
+	description: string;
+	contactEmail: string;
+	contactPhone: string;
+	address: string;
+  }
+
+  interface ParticipantRegistrationRequest {
+	skills: Array<{
+	  skillName: string;
+	  proficiencyLevel: number;
+	}>;
+  }
   
   interface AuthResponse {
 	// user: UserResponse;
@@ -30,6 +46,12 @@ interface ApiResponse<T> {
 	token: string;
   csrfToken?: string;
   CsrfToken?: string; // Support both casing conventions
+  }
+
+  interface LoginResponse {
+	user: UserResponse;
+	csrfToken?: string;
+	CsrfToken?: string;
   }
   
   interface UserResponse {
@@ -46,7 +68,7 @@ interface ApiResponse<T> {
 	constructor(
 	  message: string,
 	  public code: string,
-	  public details: any,
+	  public details: unknown,
 	  public statusCode: number
 	) {
 	  super(message);
@@ -59,7 +81,7 @@ interface ApiResponse<T> {
 	}
   
 	// Remove localStorage token storage
-	private setAccessToken(token: string) {
+	private setAccessToken(): void {
 	  // Token is now stored in HTTP-only cookies by the backend
 	  // No need to store it in localStorage
 	}
@@ -99,7 +121,7 @@ interface ApiResponse<T> {
 	}
   
 	
-	async login(data: LoginRequest): Promise<ApiResponse<AuthResponse>> {
+	async login(data: LoginRequest): Promise<ApiResponse<LoginResponse>> {
 	  const response = await fetch(`${API_URL}/login`, {
 		method: 'POST',
 		headers: {
@@ -110,7 +132,7 @@ interface ApiResponse<T> {
 		body: JSON.stringify(data),
 	  });
 	
-	  const result: ApiResponse<AuthResponse> = await response.json();
+	  const result: ApiResponse<LoginResponse> = await response.json();
 	
 	  if (!result.success) {
 		throw new AuthError(
@@ -121,29 +143,27 @@ interface ApiResponse<T> {
 		);
 	  }
 	
-	  // We need the parsed user data for the client-side context
-	  if (result.data.token) {
-		const userData = this.parseJwt(result.data.token);
+	  // Store user data from the response directly
+	  if (result.data.user && typeof window !== 'undefined') {
+		const userData = {
+		  userId: result.data.user.userId,
+		  username: result.data.user.username,
+		  email: result.data.user.email,
+		  roles: result.data.user.roles || []
+		};
 		
-		// Store user data in localStorage for client access
-		// but not the token itself (which is in HTTP-only cookies)
-		if (typeof window !== 'undefined') {
-		  localStorage.setItem('user_data', JSON.stringify({
-			userId: userData.sub,
-			email: userData.email,
-			roles: [userData['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']],
-		  }));
-		}
+		localStorage.setItem('user_data', JSON.stringify(userData));
+		console.log('User data stored:', userData);
 	  }
 	
 	  return result;
 	}
 	
-	private parseJwt(token: string) {
+	private parseJwt(token: string): Record<string, string> {
 	  try {
 		return JSON.parse(atob(token.split('.')[1]));
-	  } catch (e) {
-		return null;
+	  } catch {
+		return {};
 	  }
 	}
 
@@ -317,14 +337,13 @@ interface ApiResponse<T> {
 		headers: {
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
-		  'Authorization': `Bearer ${this.getAccessToken()}`
 		},
 		credentials: 'include',
 		body: JSON.stringify({ oldPassword, newPassword }),
 	  });
-  
+
 	  const result: ApiResponse<null> = await response.json();
-  
+
 	  if (!result.success) {
 		throw new AuthError(
 		  result.error?.message || 'Change password failed',
@@ -333,24 +352,23 @@ interface ApiResponse<T> {
 		  result.statusCode
 		);
 	  }
-  
+
 	  return result;
 	}
-  
+
 	async updateProfile(data: Partial<UserResponse>): Promise<ApiResponse<UserResponse>> {
 	  const response = await fetch(`${API_URL}/profile`, {
 		method: 'PUT',
 		headers: {
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
-		  'Authorization': `Bearer ${this.getAccessToken()}`
 		},
 		credentials: 'include',
 		body: JSON.stringify(data),
 	  });
-  
+
 	  const result: ApiResponse<UserResponse> = await response.json();
-  
+
 	  if (!result.success) {
 		throw new AuthError(
 		  result.error?.message || 'Update profile failed',
@@ -359,11 +377,93 @@ interface ApiResponse<T> {
 		  result.statusCode
 		);
 	  }
-  
+
 	  if (result.data) {
-		localStorage.setItem('user_data', JSON.stringify(result.data));
+		if (typeof window !== 'undefined') {
+		  localStorage.setItem('user_data', JSON.stringify(result.data));
+		}
 	  }
-  
+
+	  return result;
+	}
+
+	async registerConductor(data: ConductorRegistrationRequest): Promise<ApiResponse<null>> {
+	  // Use the base URL without /api/auth suffix for conductor endpoint
+	  const baseUrl = API_URL.replace('/api/auth', '');
+	  const response = await fetch(`${baseUrl}/api/Conductor/register`, {
+		method: 'POST',
+		headers: {
+		  'Content-Type': 'application/json',
+		  'Accept': 'application/json',
+		},
+		credentials: 'include',
+		body: JSON.stringify(data),
+	  });
+
+	  const result: ApiResponse<null> = await response.json();
+
+	  if (!result.success) {
+		throw new AuthError(
+		  result.error?.message || 'Conductor registration failed',
+		  result.error?.code || 'UNKNOWN_ERROR',
+		  result.error?.details,
+		  result.statusCode
+		);
+	  }
+
+	  return result;
+	}
+
+	async registerParticipant(data: ParticipantRegistrationRequest): Promise<ApiResponse<null>> {
+	  // Use the base URL without /api/auth suffix for participant endpoint
+	  const baseUrl = API_URL.replace('/api/auth', '');
+	  const response = await fetch(`${baseUrl}/api/Participant/register`, {
+		method: 'POST',
+		headers: {
+		  'Content-Type': 'application/json',
+		  'Accept': 'application/json',
+		},
+		credentials: 'include',
+		body: JSON.stringify(data),
+	  });
+
+	  const result: ApiResponse<null> = await response.json();
+
+	  if (!result.success) {
+		throw new AuthError(
+		  result.error?.message || 'Participant registration failed',
+		  result.error?.code || 'UNKNOWN_ERROR',
+		  result.error?.details,
+		  result.statusCode
+		);
+	  }
+
+	  return result;
+	}
+
+	async deleteConductorRegistration(): Promise<ApiResponse<null>> {
+	  // Use the base URL without /api/auth suffix for conductor endpoint
+	  const baseUrl = API_URL.replace('/api/auth', '');
+	  const response = await fetch(`${baseUrl}/api/Conductor/current`, {
+		method: 'DELETE',
+		headers: {
+		  'Content-Type': 'application/json',
+		  'Accept': 'application/json',
+		},
+		credentials: 'include',
+	  });
+
+	  const result: ApiResponse<null> = await response.json();
+
+	  if (!result.success) {
+		throw new AuthError(
+		  result.error?.message || 'Delete conductor registration failed',
+		  result.error?.code || 'UNKNOWN_ERROR',
+		  result.error?.details,
+		  result.statusCode
+		);
+	  }
+
 	  return result;
 	}
 	
@@ -373,73 +473,6 @@ interface ApiResponse<T> {
   
   export const authService = new AuthService();
   
-  // Axios interceptor for handling token refresh
-  import axios from 'axios';
-  
-  let isRefreshing = false;
-  let failedQueue: any[] = [];
-  
-  const processQueue = (error: Error | null, token: string | null = null) => {
-	failedQueue.forEach(prom => {
-	  if (error) {
-		prom.reject(error);
-	  } else {
-		prom.resolve(token);
-	  }
-	});
-  
-	failedQueue = [];
-  };
-  
-  axios.interceptors.request.use(
-	(config) => {
-	  const token = authService.getAccessToken();
-	  if (token) {
-		config.headers.Authorization = `Bearer ${token}`;
-	  }
-	  return config;
-	},
-	(error) => {
-	  return Promise.reject(error);
-	}
-  );
-  
-  axios.interceptors.response.use(
-	(response) => response,
-	async (error) => {
-	  const originalRequest = error.config;
-  
-	  if (error.response?.status === 401 && !originalRequest._retry) {
-		if (isRefreshing) {
-		  return new Promise((resolve, reject) => {
-			failedQueue.push({ resolve, reject });
-		  })
-			.then(token => {
-			  originalRequest.headers['Authorization'] = `Bearer ${token}`;
-			  return axios(originalRequest);
-			})
-			.catch(err => Promise.reject(err));
-		}
-  
-		originalRequest._retry = true;
-		isRefreshing = true;
-  
-		try {
-		  await authService.refreshToken();
-		  const newToken = authService.getAccessToken();
-		  processQueue(null, newToken);
-		  originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
-		  return axios(originalRequest);
-		} catch (error) {
-		  processQueue(error as Error);
-		  // Redirect to login page if refresh token is invalid
-		  window.location.href = '/login';
-		  return Promise.reject(error);
-		} finally {
-		  isRefreshing = false;
-		}
-	  }
-  
-	  return Promise.reject(error);
-	}
-  );
+  // Note: The axios interceptor is not needed for cookie-based authentication
+  // as cookies are automatically sent with requests
+  // Remove or comment out the axios interceptor code if it's not used elsewhere

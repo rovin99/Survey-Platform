@@ -16,6 +16,31 @@ var builder = WebApplication.CreateBuilder(args);
 // Load environment variables
 Env.Load();
 
+// Validate required environment variables
+var requiredEnvVars = new Dictionary<string, string>
+{
+    { "CONNECTION_STRING", Environment.GetEnvironmentVariable("CONNECTION_STRING") ?? "" },
+    { "JWT_KEY", Environment.GetEnvironmentVariable("JWT_KEY") ?? "" },
+    { "JWT_ISSUER", Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "" },
+    { "JWT_AUDIENCE", Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "" },
+    { "JWT_DURATION", Environment.GetEnvironmentVariable("JWT_DURATION") ?? "" }
+};
+
+var missingVars = requiredEnvVars.Where(kvp => string.IsNullOrEmpty(kvp.Value)).Select(kvp => kvp.Key).ToList();
+if (missingVars.Any())
+{
+    Console.Error.WriteLine($"CRITICAL ERROR: Missing required environment variables: {string.Join(", ", missingVars)}");
+    Environment.Exit(1);
+}
+
+// Validate JWT_KEY minimum length for security
+var jwtKey = Environment.GetEnvironmentVariable("JWT_KEY") ?? "";
+if (jwtKey.Length < 32)
+{
+    Console.Error.WriteLine("CRITICAL ERROR: JWT_KEY must be at least 32 characters long for security");
+    Environment.Exit(1);
+}
+
 builder.Configuration["ConnectionStrings:DefaultConnection"] = Environment.GetEnvironmentVariable("CONNECTION_STRING");
 builder.Configuration["Jwt:Key"] = Environment.GetEnvironmentVariable("JWT_KEY");
 builder.Configuration["Jwt:Issuer"] = Environment.GetEnvironmentVariable("JWT_ISSUER");
@@ -33,16 +58,63 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHttpContextAccessor();
+
+// Configure anti-forgery services
+builder.Services.AddAntiforgery(options =>
+{
+    options.Cookie.Name = "csrf-token";
+    options.Cookie.HttpOnly = false; // Allow JavaScript access
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    // Allow HTTP in development, require HTTPS in production
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() 
+        ? CookieSecurePolicy.None 
+        : CookieSecurePolicy.Always;
+    options.HeaderName = "X-CSRF-TOKEN";
+});
 builder.Services.AddScoped<IAuthService, AuthenticationService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IRoleRepository, RoleRepository>();
+builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 builder.Services.AddScoped<IConductorService, ConductorService>();
 builder.Services.AddScoped<IConductorRepository, ConductorRepository>();
 builder.Services.AddScoped<IParticipantService, ParticipantService>();
 builder.Services.AddScoped<IParticipantRepository, ParticipantRepository>();
 
+// Add background services
+builder.Services.AddHostedService<TokenCleanupService>();
+
 // Add health checks
 builder.Services.AddCustomHealthChecks();
+
+// Configure CORS securely for different environments
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("ConfiguredCorsPolicy", policy =>
+    {
+        if (builder.Environment.IsDevelopment())
+        {
+            // For local development, allow these specific origins.
+            policy.WithOrigins("http://localhost:3000", "http://localhost:5000", "http://localhost:5001", "http://localhost:8080","http://localhost:8081")
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else
+        {
+            // For production, only allow the specific frontend origin.
+            // This URL MUST be configured in your production environment variables.
+            var productionUrl = Environment.GetEnvironmentVariable("PRODUCTION_URL");
+            if (!string.IsNullOrEmpty(productionUrl))
+            {
+                policy.WithOrigins(productionUrl)
+                      .AllowAnyHeader()
+                      .AllowAnyMethod()
+                      .AllowCredentials();
+            }
+            // If PRODUCTION_URL is not set, no origins will be allowed by this policy in production.
+        }
+    });
+});
 
 // Configure PostgreSQL with Entity Framework Core
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -50,15 +122,40 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.Configure<EmailServiceSettings>(options =>
 {
-    options.BaseUrl = Environment.GetEnvironmentVariable("EMAIL_SERVICE_BASE_URL");
+    options.BaseUrl = Environment.GetEnvironmentVariable("EMAIL_SERVICE_BASE_URL") ?? "http://localhost:5000";
     options.TimeoutSeconds = int.Parse(Environment.GetEnvironmentVariable("EMAIL_SERVICE_TIMEOUT") ?? "30");
 });
 builder.Services.AddHttpClient<IEmailService, EmailService>();
-// Configure JWT authentication
+// Configure JWT authentication with support for both cookies and Authorization headers
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                // First, check for token in HttpOnly cookie
+                var cookieToken = context.Request.Cookies["accessToken"];
+                if (!string.IsNullOrEmpty(cookieToken))
+                {
+                    context.Token = cookieToken;
+                }
+                
+                // If not in cookie, check Authorization header (for microservices)
+                if (string.IsNullOrEmpty(context.Token))
+                {
+                    var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+                    if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
+                    {
+                        context.Token = authHeader.Substring(7);
+                    }
+                }
+                
+                return Task.CompletedTask;
+            }
+        };
+        
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -67,28 +164,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])),
+            ClockSkew = TimeSpan.Zero // Reduce token lifetime tolerance
         };
     });
 
-// Configure CORS
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowNextJS",
-        builder =>
-        {
-            builder
-                .WithOrigins(
-                    "http://localhost:3000",
-                    "http://localhost:5000", // Add your survey service URL if different
-                    "http://localhost:5001"  // Add any other needed services
-                )
-                .AllowAnyMethod()
-                .AllowAnyHeader()
-                .AllowCredentials();
-        });
-});
-
+// Build the application
 var app = builder.Build();
 
 // Call the seeder method
@@ -116,7 +197,10 @@ if (app.Environment.IsDevelopment())
 // app.UseHttpsRedirection();
 
 // Add CORS middleware - this must be called before Authentication and Authorization
-app.UseCors("AllowNextJS");
+app.UseCors("ConfiguredCorsPolicy");
+
+// Add rate limiting middleware
+// app.UseRateLimiter(); // Temporarily removed
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -134,17 +218,8 @@ app.Use(async (context, next) =>
     await next();
 });
 
-// Update CORS middleware to be more restrictive and secure
-app.UseCors(options => options
-    .WithOrigins(
-        "http://localhost:3000", // NextJS development
-        "https://yourproductiondomain.com" // Production domain
-    )
-    .AllowCredentials() // Required for cookies
-    .WithHeaders("Content-Type", "Accept", "Authorization", "X-CSRF-Token")
-    .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-    .SetIsOriginAllowed(origin => true) // Replace with a stricter check in production
-);
+// The insecure and duplicate CORS middleware has been removed.
+// All CORS policy is now configured securely in one place above.
 
 app.MapControllers();
 

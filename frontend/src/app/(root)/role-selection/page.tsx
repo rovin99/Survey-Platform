@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,7 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiService } from "@/services/api.service";
+import { authService } from "@/services/auth.service";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
@@ -64,6 +65,7 @@ type ConductorFormValues = z.infer<typeof conductorSchema>;
 type ParticipantFormValues = z.infer<typeof participantSchema>;
 
 export default function RoleSelectionPage() {
+  const { user, isAuthenticated, loading } = useAuth();
   const router = useRouter();
   const [selectedSkills, setSelectedSkills] = useState<{ id: string; label: string; proficiency: number }[]>([]);
   const [registrationStatus, setRegistrationStatus] = useState({
@@ -71,7 +73,7 @@ export default function RoleSelectionPage() {
     participant: false,
   });
 
-  // Conductor form
+  // Conductor form - moved to top to avoid conditional hook calls
   const conductorForm = useForm<ConductorFormValues>({
     resolver: zodResolver(conductorSchema),
     defaultValues: {
@@ -84,13 +86,34 @@ export default function RoleSelectionPage() {
     },
   });
 
-  // Participant form
+  // Participant form - moved to top to avoid conditional hook calls
   const participantForm = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema),
     defaultValues: {
       skills: [],
     },
   });
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!loading && !isAuthenticated) {
+      router.push('/login');
+    }
+  }, [isAuthenticated, loading, router]);
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated
+  if (!isAuthenticated || !user) {
+    return null;
+  }
 
   const handleAddSkill = (skillId: string, proficiency: number) => {
     const skill = skillsOptions.find((s) => s.id === skillId);
@@ -105,14 +128,22 @@ export default function RoleSelectionPage() {
 
   const onSubmitConductor = async (data: ConductorFormValues) => {
     try {
-      await apiService.post('/api/Conductor/register', data);
+      await authService.registerConductor(data);
       setRegistrationStatus(prev => ({ ...prev, conductor: true }));
-    } catch (err) {
+      
+      // Redirect to create survey page for conductors
+      setTimeout(() => {
+        router.push("/survey/create");
+      }, 1500);
+    } catch (err: unknown) {
+      console.error('Conductor registration error:', err);
       conductorForm.setError("root", {
         message: "Registration failed. Please try again.",
       });
     }
   };
+
+
 
   const onSubmitParticipant = async () => {
     try {
@@ -121,9 +152,15 @@ export default function RoleSelectionPage() {
         proficiencyLevel: skill.proficiency
       }));
       
-      await apiService.post('/api/Participant/register', { skills });
+      await authService.registerParticipant({ skills });
       setRegistrationStatus(prev => ({ ...prev, participant: true }));
+      
+      // Redirect to dashboard for participants
+      setTimeout(() => {
+        router.push("/dashboard");
+      }, 1500);
     } catch (err) {
+      console.error('Participant registration error:', err);
       participantForm.setError("root", {
         message: "Registration failed. Please try again.",
       });
@@ -158,12 +195,7 @@ export default function RoleSelectionPage() {
                 {registrationStatus.conductor ? (
                   <div className="p-4 border rounded-md bg-green-50 text-green-600 mb-4">
                     <p className="font-medium">Successfully registered as a conductor!</p>
-                    <Button 
-                      className="mt-4" 
-                      onClick={redirectToDashboard}
-                    >
-                      Go to Dashboard
-                    </Button>
+                    <p className="text-sm mt-2">Redirecting to create survey page...</p>
                   </div>
                 ) : (
                   <Form {...conductorForm}>
@@ -309,12 +341,7 @@ export default function RoleSelectionPage() {
                 {registrationStatus.participant ? (
                   <div className="p-4 border rounded-md bg-green-50 text-green-600 mb-4">
                     <p className="font-medium">Successfully registered as a participant!</p>
-                    <Button 
-                      className="mt-4" 
-                      onClick={redirectToDashboard}
-                    >
-                      Go to Dashboard
-                    </Button>
+                    <p className="text-sm mt-2">Redirecting to dashboard...</p>
                   </div>
                 ) : (
                   <div className="space-y-6">
@@ -361,7 +388,7 @@ export default function RoleSelectionPage() {
                               </SelectContent>
                             </Select>
                             
-                            <Select defaultValue="3" id="proficiency-select">
+                            <Select defaultValue="3">
                               <SelectTrigger>
                                 <SelectValue placeholder="Proficiency level" />
                               </SelectTrigger>

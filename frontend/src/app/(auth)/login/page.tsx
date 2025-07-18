@@ -20,7 +20,7 @@ import { useState, useEffect } from "react";
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string>("");
-  const { login, loading: authLoading, error: authError, isAuthenticated } = useAuth();
+  const { login, loading: authLoading, error: authError, isAuthenticated, user } = useAuth();
   const [formData, setFormData] = useState({
     username: "",
     password: "",
@@ -28,35 +28,41 @@ export default function LoginPage() {
 
   // Redirect if already authenticated
   useEffect(() => {
-    if (isAuthenticated) {
-      // Check if user is registered as conductor or participant
-      const checkUserRoles = async () => {
-        try {
-          // You might need to implement these endpoints in your API
-          const [conductorResponse, participantResponse] = await Promise.all([
-            apiService.get('/api/Conductor/current'),
-            apiService.get('/api/Participant/current')
-          ]);
-          
-          // Check if user has conductor or participant role by checking API responses
-          const isConductor = conductorResponse && Object.keys(conductorResponse).length > 0;
-          const isParticipant = participantResponse && Object.keys(participantResponse).length > 0;
-          
-          // If user has no roles yet, redirect to role selection
-          if (!isConductor && !isParticipant) {
-            router.push("/role-selection");
-          } else {
-            router.push("/dashboard");
-          }
-        } catch (error) {
-          // If API call fails, assume user needs to register roles
-          router.push("/role-selection");
-        }
-      };
-      
-      checkUserRoles();
+    if (isAuthenticated && user) {
+      handlePostLoginRedirect();
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, user]);
+
+  const handlePostLoginRedirect = async () => {
+    if (!user) return;
+
+    try {
+      // Check if user has only "User" role (needs role selection)
+      const hasOnlyUserRole = user.roles.length === 1 && user.roles.includes("User");
+      
+      if (hasOnlyUserRole) {
+        console.log("User has only 'User' role, redirecting to role selection");
+        router.push("/role-selection");
+        return;
+      }
+
+      // Check if user has other roles - if so, go to dashboard
+      if (user.roles.length > 1 || !user.roles.includes("User")) {
+        console.log("User has additional roles, redirecting to dashboard");
+        router.push("/dashboard");
+        return;
+      }
+
+      // Fallback - redirect to role selection
+      console.log("Fallback: redirecting to role selection");
+      router.push("/role-selection");
+      
+    } catch (error) {
+      console.error('Error in post-login redirect:', error);
+      // Fallback to role selection if there's an error
+      router.push("/role-selection");
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -77,6 +83,9 @@ export default function LoginPage() {
       if (response?.csrfToken) {
         apiService.setCSRFToken(response.csrfToken);
       }
+
+      // The redirect will be handled by the useEffect above
+      // after the auth context updates the user state
     } catch (err: any) {
       setError(err.message || "Invalid username or password");
     }

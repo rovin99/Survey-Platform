@@ -11,10 +11,12 @@ namespace AuthService.Services
     public class ParticipantService : IParticipantService
     {
         private readonly IParticipantRepository _participantRepository;
+        private readonly IAuthService _authService;
 
-        public ParticipantService(IParticipantRepository participantRepository)
+        public ParticipantService(IParticipantRepository participantRepository, IAuthService authService)
         {
             _participantRepository = participantRepository;
+            _authService = authService;
         }
 
         public async Task<ApiResponse<Participant>> RegisterParticipantAsync(int userId, ParticipantRegistrationRequest request)
@@ -43,12 +45,24 @@ namespace AuthService.Services
             };
 
             await _participantRepository.AddAsync(participant);
+            
+            // Add Participating role to the user
+            await _authService.AddUserRoleAsync(userId, "Participating");
+            
             return ResponseUtil.Success(participant, "Participant registered successfully");
         }
 
         public async Task<ApiResponse<Participant>> GetByIdAsync(int id)
         {
             var participant = await _participantRepository.GetByIdAsync(id);
+            return participant != null 
+                ? ResponseUtil.Success(participant) 
+                : ResponseUtil.NotFound<Participant>("Participant not found");
+        }
+
+        public async Task<ApiResponse<Participant>> GetByUserIdAsync(int userId)
+        {
+            var participant = await _participantRepository.GetByUserIdAsync(userId);
             return participant != null 
                 ? ResponseUtil.Success(participant) 
                 : ResponseUtil.NotFound<Participant>("Participant not found");

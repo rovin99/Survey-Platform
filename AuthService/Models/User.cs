@@ -33,5 +33,8 @@ namespace AuthService.Models
 
         [JsonIgnore]
         public Participant Participant { get; set; }
+
+        [JsonIgnore]
+        public List<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
     }
 }

@@ -51,6 +51,10 @@ metadata:
     konghq.com/strip-path: "true"
     konghq.com/protocols: "https"
     konghq.com/https-redirect-status-code: "301"
+    # Add CORS headers for survey service
+    konghq.com/headers.add: "Access-Control-Allow-Origin: *"
+    # Health check annotations
+    nginx.ingress.kubernetes.io/health-check-path: "/health"
 spec:
   ingressClassName: kong
   rules:
@@ -61,9 +65,9 @@ spec:
         backend:
           service:
             # Point to the Knative service's Kubernetes service
-            name: survey-management-service-00001
+            name: survey-management-service
             port:
-              number: 8080
+              number: 80
 ---
 # 5. Kong Service Configuration (unchanged)
 apiVersion: v1

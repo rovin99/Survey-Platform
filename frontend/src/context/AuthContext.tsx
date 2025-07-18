@@ -113,15 +113,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       setLoading(true);
       const response = await authService.login({ username, password });
+      
+      // Refresh user data after login
       await refreshUser();
       
       // Return the CSRF token if available in the response
-      const csrfToken = response.data.CsrfToken || response.data.csrfToken;
+      const csrfToken = response.data.csrfToken || response.data.CsrfToken;
       if (csrfToken && typeof csrfToken === 'string') {
         apiService.setCSRFToken(csrfToken);
       }
       
-      router.push('/dashboard');
+      // Don't redirect here - let the login page handle role-based redirects
+      console.log("Login successful, user data updated");
       
       return { csrfToken };
     } catch (err) {

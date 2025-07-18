@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { useAuth } from "@/context/AuthContext";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -32,9 +33,18 @@ interface NavbarProps {
 }
 
 export function Navbar({ userType }: NavbarProps) {
+	const { user, logout } = useAuth();
 	const [searchOpen, setSearchOpen] = useState(false);
 	const [title, setTitle] = useState("");
 	const [tags, setTags] = useState("");
+
+	const handleLogout = async () => {
+		try {
+			await logout();
+		} catch (error) {
+			console.error('Logout failed:', error);
+		}
+	};
 
 	const notifications = [
 		{
@@ -56,7 +66,7 @@ export function Navbar({ userType }: NavbarProps) {
 	return (
 		<nav className="border-b">
 			<div className="flex h-16 items-center px-4">
-				<Link href="/home_page" className="text-xl font-bold">
+				<Link href="/dashboard" className="text-xl font-bold">
 					<h1 className="text-2xl font-bold text-blue-600 pl-4">SurveyPro</h1>
 				</Link>
 
@@ -154,11 +164,11 @@ export function Navbar({ userType }: NavbarProps) {
 						<DropdownMenuContent align="end">
 							<DropdownMenuItem>
 								<User className="mr-2 h-4 w-4" />
-								Profile
+								<span>Profile ({user?.username})</span>
 							</DropdownMenuItem>
-							<DropdownMenuItem>
+							<DropdownMenuItem onClick={handleLogout}>
 								<LogOut className="mr-2 h-4 w-4" />
-								Logout
+								<span>Logout</span>
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>

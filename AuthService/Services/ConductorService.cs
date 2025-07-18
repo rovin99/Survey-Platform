@@ -10,22 +10,57 @@ namespace AuthService.Services
     {
         private readonly IConductorRepository _conductorRepository;
         private readonly IEmailService _emailService;
+        private readonly IAuthService _authService;
         
         public ConductorService(
             IConductorRepository conductorRepository,
-            IEmailService emailService
+            IEmailService emailService,
+            IAuthService authService
         )
         {
             _conductorRepository = conductorRepository;
             _emailService = emailService;
+            _authService = authService;
         }
 
         public async Task RegisterConductorAsync(int userId, ConductorRegistrationRequest request)
-        {   var existingConductor = await _conductorRepository.GetByUserIdAsync(userId);
+        {   
+            var existingConductor = await _conductorRepository.GetByUserIdAsync(userId);
             if (existingConductor != null)
             {
-                throw new InvalidOperationException("User is already registered as a conductor.");
+                // Update existing conductor instead of throwing an error
+                existingConductor.Name = request.Name;
+                existingConductor.ConductorType = request.ConductorType;
+                existingConductor.Description = request.Description;
+                existingConductor.ContactEmail = request.ContactEmail;
+                existingConductor.ContactPhone = request.ContactPhone;
+                existingConductor.Address = request.Address;
+                existingConductor.UpdatedAt = DateTime.UtcNow;
+
+                try
+                {
+                    await _conductorRepository.UpdateAsync(existingConductor);
+                    
+                    // Ensure user has Conducting role (in case it was missing)
+                    await _authService.AddUserRoleAsync(userId, "Conducting");
+                    
+                    // Try to send verification email, but don't fail if email service is unavailable
+                    try
+                    {
+                        await _emailService.SendVerificationEmailAsync(existingConductor.ContactEmail);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Warning: Failed to send verification email to {existingConductor.ContactEmail}: {ex.Message}");
+                    }
+                }
+                catch (Exception)
+                {
+                    throw;
+                }
+                return;
             }
+            
             var conductor = new Conductor
             {
                 UserId = userId,
@@ -40,13 +75,49 @@ namespace AuthService.Services
                 UpdatedAt = DateTime.UtcNow
             };
 
-            await _conductorRepository.AddAsync(conductor);
-            await _emailService.SendVerificationEmailAsync(conductor.ContactEmail);
+            try
+            {
+                await _conductorRepository.AddAsync(conductor);
+                
+                // Add Conducting role to the user
+                await _authService.AddUserRoleAsync(userId, "Conducting");
+                
+                // Try to send verification email, but don't fail if email service is unavailable
+                try
+                {
+                    await _emailService.SendVerificationEmailAsync(conductor.ContactEmail);
+                }
+                catch (Exception ex)
+                {
+                    // Log the error but don't fail the registration
+                    // In production, you might want to queue this for retry
+                    Console.WriteLine($"Warning: Failed to send verification email to {conductor.ContactEmail}: {ex.Message}");
+                }
+            }
+            catch (Exception)
+            {
+                // If conductor creation fails, let the exception bubble up
+                throw;
+            }
         }
 
         public async Task<Conductor> GetByIdAsync(int id)
         {
             return await _conductorRepository.GetByIdAsync(id);
+        }
+
+        public async Task<Conductor> GetByUserIdAsync(int userId)
+        {
+            return await _conductorRepository.GetByUserIdAsync(userId);
+        }
+
+        public async Task DeleteByUserIdAsync(int userId)
+        {
+            var conductor = await _conductorRepository.GetByUserIdAsync(userId);
+            if (conductor != null)
+            {
+                await _conductorRepository.DeleteAsync(conductor.ConductorId);
+            }
         }
 
         

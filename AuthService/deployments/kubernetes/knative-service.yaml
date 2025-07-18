@@ -30,9 +30,28 @@ spec:
         # Your application image
         image: rovin123/auth-service:v2
         
+        # Security context for enhanced security
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        
+        # Volume mounts for writable directories
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: var-tmp-volume
+          mountPath: /var/tmp
+        
         # Port configuration - Knative will inject PORT env var automatically
         ports:
-        - containerPort: 80
+        - containerPort: 8080
           protocol: TCP
           
         # Environment variables from ConfigMap and Secret
@@ -42,10 +61,7 @@ spec:
           - secretRef:
               name: auth-service-secrets
               
-        # Additional environment variables
-        env:
-        - name: ASPNETCORE_URLS
-          value: "http://*:$(PORT)"
+        # Let Knative inject PORT - no need to override ASPNETCORE_URLS
           
         # Resource limits and requests
         resources:
@@ -60,7 +76,7 @@ spec:
         livenessProbe:
           httpGet:
             path: /health/live
-            port: 80
+            port: 8080
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
@@ -69,7 +85,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /health/ready
-            port: 80
+            port: 8080
           initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 3
@@ -79,11 +95,18 @@ spec:
         startupProbe:
           httpGet:
             path: /health/startup
-            port: 80
+            port: 8080
           initialDelaySeconds: 10
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 10
+      
+      # Volumes for security context with read-only root filesystem
+      volumes:
+      - name: tmp-volume
+        emptyDir: {}
+      - name: var-tmp-volume
+        emptyDir: {}
         
       # Container concurrency
       containerConcurrency: 10 

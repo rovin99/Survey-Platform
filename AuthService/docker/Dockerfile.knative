@@ -18,14 +18,14 @@ WORKDIR /app
 COPY --from=build /app/publish .
 
 # For Knative: Let the platform set the port via PORT env var
-# Remove fixed ASPNETCORE_URLS and let Knative inject PORT
 ENV ASPNETCORE_ENVIRONMENT=Production
+ENV ASPNETCORE_URLS=http://*:8080
 
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' --shell /bin/sh --uid 1000 appuser
 USER appuser
 
-# Knative will inject PORT environment variable
+# Knative will inject PORT environment variable, but we default to 8080
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "AuthService.dll"] 

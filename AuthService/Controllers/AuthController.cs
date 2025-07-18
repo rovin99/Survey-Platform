@@ -12,6 +12,9 @@ using System.ComponentModel.DataAnnotations;
 using System.Net;
 using Microsoft.AspNetCore.Http;
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Hosting;
 
 namespace AuthService.Controllers 
 {
@@ -20,14 +23,17 @@ namespace AuthService.Controllers
     public class AuthController : ControllerBase 
     {
         private readonly IAuthService _authService;
+        private readonly IAntiforgery _antiforgery;
 
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, IAntiforgery antiforgery)
         {
             _authService = authService;
+            _antiforgery = antiforgery;
         }
 
         
         [HttpPost("register")]
+        // [EnableRateLimiting("AuthPolicy")] // Temporarily commented out
         public async Task<ActionResult<ApiResponse<UserDTO>>> Register([FromBody] RegisterUserDTO model)
         {
             // Validation
@@ -43,35 +49,44 @@ namespace AuthService.Controllers
 
             try
             {
-                var (user, accessToken) = await _authService.RegisterUserAsync(model.Username, model.Email, model.Password, "User");
+                var (user, accessToken, refreshToken) = await _authService.RegisterUserAsync(model.Username, model.Email, model.Password, "User");
                 var userDto = UserDTO.FromUser(user);
-                userDto.Token = accessToken; // Assuming UserDTO has a Token property
                 
-                // Generate CSRF token
-                var csrfToken = GenerateCSRFToken();
+                // Generate anti-forgery token
+                var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
+                
+                // Cookie options - secure in production, allow HTTP in development
+                var cookieOptions = new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = !HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment(),
+                    SameSite = SameSiteMode.Strict,
+                    Path = "/"
+                };
                 
                 // Set access token in HTTP-only cookie
                 Response.Cookies.Append("accessToken", accessToken, new CookieOptions
                 {
-                    HttpOnly = true,
-                    Secure = true, // Use only HTTPS
-                    SameSite = SameSiteMode.Strict,
-                    Expires = DateTime.Now.AddMinutes(15),
-                    Path = "/"
+                    HttpOnly = cookieOptions.HttpOnly,
+                    Secure = cookieOptions.Secure,
+                    SameSite = cookieOptions.SameSite,
+                    Expires = DateTime.UtcNow.AddMinutes(15),
+                    Path = cookieOptions.Path
                 });
                 
-                // Set CSRF token in a regular cookie (accessible to JavaScript)
-                Response.Cookies.Append("csrf-token", csrfToken, new CookieOptions
+                // Set refresh token in HTTP-only cookie
+                Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
                 {
-                    HttpOnly = false, // JavaScript needs access
-                    Secure = true,
-                    SameSite = SameSiteMode.Strict,
-                    Expires = DateTime.Now.AddMinutes(15),
-                    Path = "/"
+                    HttpOnly = cookieOptions.HttpOnly,
+                    Secure = cookieOptions.Secure,
+                    SameSite = cookieOptions.SameSite,
+                    Expires = DateTime.UtcNow.AddDays(7),
+                    Path = "/api/auth/refresh" // Only send refresh token to refresh endpoint
                 });
                 
+                // Anti-forgery token is automatically set in cookie by ASP.NET Core
                 // Add CSRF token to response for initial setup
-                userDto.CsrfToken = csrfToken;
+                userDto.CsrfToken = tokens.RequestToken;
                 
                 return Ok(ResponseUtil.Success(
                     userDto,
@@ -109,34 +124,45 @@ namespace AuthService.Controllers
 
             try
             {
-                var (accessToken, user) = await _authService.LoginAsync(model.Username, model.Password);
+                var (accessToken, refreshToken, user) = await _authService.LoginAsync(model.Username, model.Password);
                 
-                // Generate CSRF token
-                var csrfToken = GenerateCSRFToken();
+                // Generate anti-forgery token
+                var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
+                
+                // Cookie options - secure in production, allow HTTP in development
+                var cookieOptions = new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = !HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment(),
+                    SameSite = SameSiteMode.Strict,
+                    Path = "/"
+                };
                 
                 // Set access token in HTTP-only cookie
                 Response.Cookies.Append("accessToken", accessToken, new CookieOptions
                 {
-                    HttpOnly = true,
-                    Secure = true, // Use only HTTPS
-                    SameSite = SameSiteMode.Strict,
-                    Expires = DateTime.Now.AddMinutes(15),
-                    Path = "/"
+                    HttpOnly = cookieOptions.HttpOnly,
+                    Secure = cookieOptions.Secure,
+                    SameSite = cookieOptions.SameSite,
+                    Expires = DateTime.UtcNow.AddMinutes(15),
+                    Path = cookieOptions.Path
                 });
                 
-                // Set CSRF token in a regular cookie (accessible to JavaScript)
-                Response.Cookies.Append("csrf-token", csrfToken, new CookieOptions
+                // Set refresh token in HTTP-only cookie
+                Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
                 {
-                    HttpOnly = false, // JavaScript needs access
-                    Secure = true,
-                    SameSite = SameSiteMode.Strict,
-                    Expires = DateTime.Now.AddMinutes(15),
-                    Path = "/"
+                    HttpOnly = cookieOptions.HttpOnly,
+                    Secure = cookieOptions.Secure,
+                    SameSite = cookieOptions.SameSite,
+                    Expires = DateTime.UtcNow.AddDays(7),
+                    Path = "/api/auth/refresh" // Only send refresh token to refresh endpoint
                 });
                 
+                // Anti-forgery token is automatically set in cookie by ASP.NET Core
                 var response = new LoginResponseDTO { 
-                    Token = accessToken,
-                    CsrfToken = csrfToken
+                    CsrfToken = tokens.RequestToken,
+                    User = UserDTO.FromUser(user)
+                    // Don't return tokens in response body for security
                 };
                 
                 return Ok(ResponseUtil.Success(response, "Login successful"));
@@ -196,7 +222,6 @@ namespace AuthService.Controllers
 
         [Authorize(Roles = "Admin")]
         [HttpPost("users/roles")]
-        [ValidateAntiForgeryToken]
         public async Task<ActionResult<ApiResponse<object>>> AddUserRole([FromBody] UserRoleUpdateModel model)
         {
             try
@@ -219,7 +244,6 @@ namespace AuthService.Controllers
 
         [Authorize(Roles = "Admin")]
         [HttpDelete("users/roles")]
-        [ValidateAntiForgeryToken]
         public async Task<ActionResult<ApiResponse<object>>> RemoveUserRole([FromBody] UserRoleUpdateModel model)
         {
             
@@ -260,9 +284,19 @@ namespace AuthService.Controllers
                 errors.Add("A valid email address is required");
             }
 
-            if (string.IsNullOrEmpty(model.Password) || model.Password.Length < 6)
+            if (string.IsNullOrEmpty(model.Password) || model.Password.Length < 8)
             {
-                errors.Add("Password must be at least 6 characters long");
+                errors.Add("Password must be at least 8 characters long");
+            }
+            
+            // Check password complexity
+            if (!string.IsNullOrEmpty(model.Password))
+            {
+                var passwordRegex = @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\da-zA-Z]).{8,}$";
+                if (!System.Text.RegularExpressions.Regex.IsMatch(model.Password, passwordRegex))
+                {
+                    errors.Add("Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character");
+                }
             }
 
             return errors;
@@ -289,50 +323,106 @@ namespace AuthService.Controllers
             ));
         }
 
+        [HttpPost("validate")]
+        public async Task<ActionResult<ApiResponse<TokenValidationResponse>>> ValidateToken([FromBody] TokenValidationRequest request)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(request?.Token))
+                {
+                    return BadRequest(ResponseUtil.Error<TokenValidationResponse>(
+                        "Token is required",
+                        "VALIDATION_ERROR"
+                    ));
+                }
+
+                // Validate the token using the AuthService
+                var principal = _authService.ValidateToken(request.Token);
+                
+                // Extract user information from claims
+                var userId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+                var username = principal.FindFirst(JwtRegisteredClaimNames.UniqueName)?.Value;
+                var email = principal.FindFirst(JwtRegisteredClaimNames.Email)?.Value;
+                var roles = principal.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
+
+                var response = new TokenValidationResponse
+                {
+                    IsValid = true,
+                    UserId = userId,
+                    Username = username,
+                    Email = email,
+                    Roles = roles
+                };
+
+                return Ok(ResponseUtil.Success(response, "Token is valid"));
+            }
+            catch (Exception ex)
+            {
+                var response = new TokenValidationResponse
+                {
+                    IsValid = false,
+                    Error = ex.Message
+                };
+
+                return Ok(ResponseUtil.Success(response, "Token validation completed"));
+            }
+        }
+
         [HttpPost("refresh-token")]
         public async Task<ActionResult<ApiResponse<string>>> RefreshToken()
         {
             try
             {
-                // In a cookie-based auth system, we need to validate the current tokens
-                // Note: In a real implementation, you would have a refresh token mechanism
-                var accessToken = Request.Cookies["accessToken"];
-                if (string.IsNullOrEmpty(accessToken))
+                // Get refresh token from cookie
+                var refreshToken = Request.Cookies["refreshToken"];
+                if (string.IsNullOrEmpty(refreshToken))
                 {
                     return Unauthorized(ResponseUtil.Error<string>(
-                        "No access token found",
-                        "MISSING_TOKEN",
+                        "No refresh token found",
+                        "MISSING_REFRESH_TOKEN",
                         statusCode: (int)HttpStatusCode.Unauthorized
                     ));
                 }
 
-                // Generate a new access token using the implemented method
-                var newAccessToken = await _authService.RefreshAccessTokenAsync(accessToken);
+                // Refresh tokens using the new system
+                var (newAccessToken, newRefreshToken) = await _authService.RefreshTokenAsync(refreshToken);
                 
-                // Generate new CSRF token
-                var csrfToken = GenerateCSRFToken();
+                // Generate new anti-forgery token
+                var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
                 
-                // Set new tokens in cookies
-                Response.Cookies.Append("accessToken", newAccessToken, new CookieOptions
+                // Cookie options - secure in production, allow HTTP in development
+                var cookieOptions = new CookieOptions
                 {
                     HttpOnly = true,
-                    Secure = true,
+                    Secure = !HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment(),
                     SameSite = SameSiteMode.Strict,
-                    Expires = DateTime.Now.AddMinutes(15),
                     Path = "/"
+                };
+                
+                // Set new access token in HTTP-only cookie
+                Response.Cookies.Append("accessToken", newAccessToken, new CookieOptions
+                {
+                    HttpOnly = cookieOptions.HttpOnly,
+                    Secure = cookieOptions.Secure,
+                    SameSite = cookieOptions.SameSite,
+                    Expires = DateTime.UtcNow.AddMinutes(15),
+                    Path = cookieOptions.Path
                 });
                 
-                Response.Cookies.Append("csrf-token", csrfToken, new CookieOptions
+                // Set new refresh token in HTTP-only cookie
+                Response.Cookies.Append("refreshToken", newRefreshToken, new CookieOptions
                 {
-                    HttpOnly = false,
-                    Secure = true,
-                    SameSite = SameSiteMode.Strict,
-                    Expires = DateTime.Now.AddMinutes(15),
-                    Path = "/"
+                    HttpOnly = cookieOptions.HttpOnly,
+                    Secure = cookieOptions.Secure,
+                    SameSite = cookieOptions.SameSite,
+                    Expires = DateTime.UtcNow.AddDays(7),
+                    Path = "/api/auth/refresh" // Only send refresh token to refresh endpoint
                 });
+                
+                // Anti-forgery token is automatically set in cookie by ASP.NET Core
                 
                 // Return the CSRF token to the client
-                return Ok(ResponseUtil.Success(csrfToken, "Token refreshed successfully"));
+                return Ok(ResponseUtil.Success(tokens.RequestToken, "Token refreshed successfully"));
             }
             catch (Exception ex)
             {
@@ -348,34 +438,71 @@ namespace AuthService.Controllers
         [HttpPost("logout")]
         public async Task<ActionResult<ApiResponse<object>>> Logout()
         {
-            // Call the LogoutAsync method of the auth service
-            await _authService.LogoutAsync();
-            
-            // Clear auth cookies
-            Response.Cookies.Delete("accessToken");
-            Response.Cookies.Delete("csrf-token");
-            
-            return Ok(ResponseUtil.Success<object>(
-                new {}, // Empty object instead of null
-                "Logged out successfully"
-            ));
-        }
-        
-        // Helper to generate CSRF token
-        private string GenerateCSRFToken()
-        {
-            var randomBytes = new byte[32];
-            using (var rng = RandomNumberGenerator.Create())
+            try
             {
-                rng.GetBytes(randomBytes);
+                // Get refresh token from cookie to invalidate it
+                var refreshToken = Request.Cookies["refreshToken"];
+                
+                // Call the LogoutAsync method with refresh token
+                await _authService.LogoutAsync(refreshToken);
+                
+                // Cookie options for clearing - secure in production, allow HTTP in development
+                var isDevelopment = HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment();
+                
+                // Clear all auth cookies
+                Response.Cookies.Delete("accessToken", new CookieOptions 
+                { 
+                    Path = "/",
+                    Secure = !isDevelopment,
+                    SameSite = SameSiteMode.Strict
+                });
+                
+                Response.Cookies.Delete("refreshToken", new CookieOptions 
+                { 
+                    Path = "/api/auth/refresh",
+                    Secure = !isDevelopment,
+                    SameSite = SameSiteMode.Strict
+                });
+                
+                Response.Cookies.Delete("csrf-token", new CookieOptions 
+                { 
+                    Secure = !isDevelopment,
+                    SameSite = SameSiteMode.Strict
+                });
+                
+                return Ok(ResponseUtil.Success<object>(
+                    new {}, // Empty object instead of null
+                    "Logged out successfully"
+                ));
             }
-            return Convert.ToBase64String(randomBytes);
+            catch (Exception ex)
+            {
+                return BadRequest(ResponseUtil.Error<object>(
+                    ex.Message,
+                    "LOGOUT_ERROR"
+                ));
+            }
         }
     }
     
     public class LoginResponseDTO
     {
-        public string Token { get; set; } = string.Empty;
         public string CsrfToken { get; set; } = string.Empty;
+        public UserDTO User { get; set; } = new UserDTO();
+    }
+
+    public class TokenValidationRequest
+    {
+        public string Token { get; set; } = string.Empty;
+    }
+
+    public class TokenValidationResponse
+    {
+        public bool IsValid { get; set; }
+        public string? UserId { get; set; }
+        public string? Username { get; set; }
+        public string? Email { get; set; }
+        public List<string> Roles { get; set; } = new List<string>();
+        public string? Error { get; set; }
     }
 }

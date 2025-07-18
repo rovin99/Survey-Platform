@@ -17,6 +17,7 @@ public class RoleRepository : IRoleRepository
 
     public async Task<Role> GetByNameAsync(string name)
     {
-        return await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == name);
+        // Use EF.Functions.Like for case-insensitive comparison that works with the database
+        return await _context.Roles.FirstOrDefaultAsync(r => EF.Functions.Like(r.RoleName, name));
     }
 }

@@ -166,13 +166,13 @@ The AuthService requires several Kubernetes resources:
 #### Secrets (Sensitive Configuration)
 ```bash
 # Apply secrets for database and JWT configuration
-kubectl apply -f k8s/secrets.yaml
+kubectl apply -f deployments/kubernetes/secrets.yaml
 ```
 
 #### ConfigMap (Non-sensitive Configuration)
 ```bash
 # Apply configuration
-kubectl apply -f k8s/configmap.yaml
+kubectl apply -f deployments/kubernetes/configmap.yaml
 ```
 
 ### Step 7: Build and Deploy AuthService
@@ -193,7 +193,7 @@ app.MapCustomHealthChecks();
 
 ```bash
 # Build image with health checks
-docker build -f Dockerfile.knative -t rovin123/auth-service:v2 .
+docker build -f docker/Dockerfile.knative -t rovin123/auth-service:v2 .
 
 # Push to registry
 docker push rovin123/auth-service:v2
@@ -203,7 +203,7 @@ docker push rovin123/auth-service:v2
 
 ```bash
 # Deploy the Knative service
-kubectl apply -f k8s/knative-service.yaml
+kubectl apply -f deployments/kubernetes/knative-service.yaml
 
 # Monitor deployment
 kubectl get ksvc auth-service -w

@@ -1,82 +1,142 @@
-# 1. Create the Kong Namespace
+# Unified Kong Gateway for Survey Platform
+# This replaces individual Kong files from AuthService and SurveyManagementService
+
 apiVersion: v1
 kind: Namespace
 metadata:
   name: kong
+  labels:
+    app: survey-platform
 ---
-# 2. Kong Rate Limiting Plugin
+# Kong Rate Limiting Plugin
 apiVersion: configuration.konghq.com/v1
 kind: KongPlugin
 metadata:
-  name: rate-limiting
+  name: survey-platform-rate-limiting
   namespace: kong
 plugin: rate-limiting
 config:
-  minute: 100
+  minute: 1000
+  hour: 10000
   policy: local
 ---
-# 3. Kong Ingress Configuration for Knative Auth Service
+# Kong CORS Plugin for Frontend Integration
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: survey-platform-cors
+  namespace: kong
+plugin: cors
+config:
+  origins: ["*"]
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  headers: ["Accept", "Content-Type", "Authorization"]
+  credentials: true
+---
+# Kong JWT Plugin for Auth Validation
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: survey-platform-jwt
+  namespace: kong
+plugin: jwt
+config:
+  claims_to_verify: ["exp"]
+  key_claim_name: "iss"
+  secret_is_base64: false
+---
+# Unified Ingress for All Services
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: auth-gateway
+  name: survey-platform-gateway
   namespace: kong
   annotations:
-    konghq.com/plugins: rate-limiting
-    konghq.com/strip-path: "true"
+    konghq.com/plugins: survey-platform-rate-limiting,survey-platform-cors
     konghq.com/protocols: "https"
     konghq.com/https-redirect-status-code: "301"
+    konghq.com/preserve-host: "true"
 spec:
   ingressClassName: kong
+  tls:
+  - hosts:
+    - api.local                    # For local development
+    - api.yourplatform.com         # For production
+    secretName: survey-platform-tls
   rules:
-  - http:
+  # Local development rule
+  - host: api.local
+    http:
       paths:
-      - path: /api/auth
+      - path: /auth
         pathType: Prefix
         backend:
           service:
-            name: auth-service-00001      # Knative service name with revision
+            name: auth-service
+            port:
+              number: 80
+      - path: /surveys
+        pathType: Prefix
+        backend:
+          service:
+            name: survey-management-service
+            port:
+              number: 80
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: survey-management-service
+            port:
+              number: 80
+  # Production rule
+  - host: api.yourplatform.com
+    http:
+      paths:
+      - path: /auth
+        pathType: Prefix
+        backend:
+          service:
+            name: auth-service
+            port:
+              number: 80
+      - path: /surveys
+        pathType: Prefix
+        backend:
+          service:
+            name: survey-management-service
+            port:
+              number: 80
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: survey-management-service
             port:
               number: 80
 ---
-# 4. Kong Ingress Configuration for Knative Survey Management Service
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: survey-gateway
-  namespace: kong
-  annotations:
-    konghq.com/plugins: rate-limiting
-    konghq.com/strip-path: "true"
-    konghq.com/protocols: "https"
-    konghq.com/https-redirect-status-code: "301"
-spec:
-  ingressClassName: kong
-  rules:
-  - http:
-      paths:
-      - path: /api/surveys
-        pathType: Prefix
-        backend:
-          service:
-            name: survey-management-service-00001  # Knative service name with revision
-            port:
-              number: 8080
----
-# 5. Kong Service Configuration
+# Kong Proxy Service
 apiVersion: v1
 kind: Service
 metadata:
   name: kong-proxy
   namespace: kong
+  labels:
+    app: survey-platform
 spec:
   type: LoadBalancer
   ports:
-  - name: proxy
+  - name: proxy-ssl
     port: 443
     targetPort: 8443
-  - name: proxy-http
+    protocol: TCP
+  - name: proxy
     port: 80
     targetPort: 8000
+    protocol: TCP
+  - name: admin-api
+    port: 8001
+    targetPort: 8001
+    protocol: TCP
   selector:
     app: kong 

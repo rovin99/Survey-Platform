@@ -29,6 +29,18 @@ const nextConfig = {
 						key: "Referrer-Policy",
 						value: "strict-origin-when-cross-origin",
 					},
+					{
+						key: "Permissions-Policy",
+						value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), speaker=(), notifications=()",
+					},
+					{
+						key: "Content-Security-Policy",
+						value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:5171 http://localhost:5172; frame-ancestors 'none'; base-uri 'self'; form-action 'self';",
+					},
+					{
+						key: "Strict-Transport-Security",
+						value: "max-age=31536000; includeSubDomains; preload",
+					},
 				],
 			},
 		];
@@ -40,6 +52,8 @@ const nextConfig = {
 	// Configure allowed domains for images if you're using them
 	images: {
 		domains: [],
+		dangerouslyAllowSVG: false,
+		contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
 	},
 	// Configure redirects if needed
 	async redirects() {
@@ -58,6 +72,15 @@ const nextConfig = {
 			allowedOrigins: ['localhost:3000'],
 			bodySizeLimit: '2mb'
 		},
+	},
+	// Add security-related webpack configuration
+	webpack: (config, { dev, isServer }) => {
+		// Add security-related webpack plugins if needed
+		if (!dev && !isServer) {
+			// Production client-side optimizations
+			config.optimization.minimizer = config.optimization.minimizer || [];
+		}
+		return config;
 	},
 };
 

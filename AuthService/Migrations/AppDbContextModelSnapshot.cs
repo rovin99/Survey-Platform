@@ -139,6 +139,59 @@ namespace AuthService.Migrations
                     b.ToTable("ParticipantsSkill");
                 });
 
+            modelBuilder.Entity("AuthService.Models.RefreshToken", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByIp")
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReplacedByToken")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RevokedByIp")
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)");
+
+                    b.Property<string>("RevokedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RefreshTokens");
+                });
+
             modelBuilder.Entity("AuthService.Models.Role", b =>
                 {
                     b.Property<int>("RoleId")
@@ -236,6 +289,17 @@ namespace AuthService.Migrations
                     b.Navigation("Participant");
                 });
 
+            modelBuilder.Entity("AuthService.Models.RefreshToken", b =>
+                {
+                    b.HasOne("AuthService.Models.User", "User")
+                        .WithMany("RefreshTokens")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("AuthService.Models.UserRole", b =>
                 {
                     b.HasOne("AuthService.Models.Role", "Role")
@@ -272,6 +336,8 @@ namespace AuthService.Migrations
 
                     b.Navigation("Participant")
                         .IsRequired();
+
+                    b.Navigation("RefreshTokens");
 
                     b.Navigation("UserRoles");
                 });

@@ -2,6 +2,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using AuthService.Models;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 public static class DatabaseSeeder
 {
@@ -11,20 +12,22 @@ public static class DatabaseSeeder
         {
             using var scope = serviceProvider.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+            var logger = loggerFactory.CreateLogger(typeof(DatabaseSeeder));
 
             // Test if database is accessible
             bool canConnect = await context.Database.CanConnectAsync();
             if (!canConnect)
             {
-                Console.WriteLine("Cannot connect to the database. Skipping seeding.");
+                logger.LogWarning("Cannot connect to the database. Skipping seeding.");
                 return;
             }
 
-            Console.WriteLine("Database connection successful. Checking if seeding is needed...");
+            logger.LogInformation("Database connection successful. Checking if seeding is needed...");
 
             if (!await context.Roles.AnyAsync())
             {
-                Console.WriteLine("Seeding roles and admin user...");
+                logger.LogInformation("Seeding roles and admin user...");
                 var adminRole = new Role { RoleName = "Admin" };
                 var userRole = new Role { RoleName = "User" };
                 var participatingRole = new Role { RoleName = "Participating" };
@@ -41,7 +44,15 @@ public static class DatabaseSeeder
                     ? "Adm!n@Railway#" + Guid.NewGuid().ToString()[..8] // Generate a partially random secure password
                     : "admin123";  // Simple password for development
                 
-                Console.WriteLine($"Admin user created with password: {adminPassword}");
+                // SECURITY: Never log passwords in production
+                if (!isProduction)
+                {
+                    logger.LogInformation("Development admin user created with password: {AdminPassword}", adminPassword);
+                }
+                else
+                {
+                    logger.LogInformation("Production admin user created with secure password");
+                }
                     
                 // Create an admin user
                 var adminUser = new User
@@ -60,22 +71,28 @@ public static class DatabaseSeeder
                 await context.UserRoles.AddAsync(new UserRole { UserId = adminUser.UserId, RoleId = adminRole.RoleId });
                 await context.SaveChangesAsync();
                 
-                Console.WriteLine("Database seeding completed successfully.");
+                logger.LogInformation("Database seeding completed successfully.");
             }
             else
             {
-                Console.WriteLine("Database already seeded. Skipping.");
+                logger.LogInformation("Database already seeded. Skipping.");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error during database seeding: {ex.Message}");
-            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            // Use proper logging instead of console output to avoid information disclosure
+            using var scope = serviceProvider.CreateScope();
+            var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+            var logger = loggerFactory.CreateLogger(typeof(DatabaseSeeder));
             
-            if (ex.InnerException != null)
-            {
-                Console.WriteLine($"Inner exception: {ex.InnerException.Message}");
-            }
+            // Log the full exception details for debugging (this goes to structured logging)
+            logger.LogError(ex, "Error occurred during database seeding");
+            
+            // Only log basic error message to console for operational awareness
+            Console.WriteLine("Database seeding failed. Check logs for details.");
+            
+            // Re-throw to ensure the application doesn't start with an inconsistent state
+            throw;
         }
     }
 }

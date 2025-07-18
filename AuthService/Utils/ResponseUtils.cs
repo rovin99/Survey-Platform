@@ -4,18 +4,18 @@ namespace AuthService.Utils
 {
     public class ApiResponse<T>
     {
-        public string Message { get; set; }
-        public T Data { get; set; }
-        public ErrorDetail Error { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public T? Data { get; set; }
+        public ErrorDetail? Error { get; set; }
         public int StatusCode { get; set; }
         public bool Success { get; set; }
     }
 
     public class ErrorDetail
     {
-        public string Message { get; set; }
-        public string Code { get; set; }
-        public object Details { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public string? Code { get; set; }
+        public object? Details { get; set; }
     }
 
     public static class ResponseUtil
@@ -33,10 +33,10 @@ namespace AuthService.Utils
         }
 
         public static ApiResponse<T> Error<T>(string message, 
-            string errorCode = null, 
-            object errorDetails = null, 
+            string? errorCode = null, 
+            object? errorDetails = null, 
             int statusCode = (int)HttpStatusCode.BadRequest,
-            T data = default)
+            T? data = default)
         {
             return new ApiResponse<T>
             {

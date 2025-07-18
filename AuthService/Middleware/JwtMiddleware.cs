@@ -7,7 +7,7 @@ using System;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
-
+using Microsoft.Extensions.Logging;
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
@@ -17,11 +17,13 @@ public class JwtMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<JwtMiddleware> _logger;
 
-    public JwtMiddleware(RequestDelegate next, IConfiguration configuration)
+    public JwtMiddleware(RequestDelegate next, IConfiguration configuration, ILogger<JwtMiddleware> logger)
     {
         _next = next;
         _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task Invoke(HttpContext context)
@@ -52,14 +54,46 @@ public class JwtMiddleware
             }, out SecurityToken validatedToken);
 
             var jwtToken = (JwtSecurityToken)validatedToken;
-            var userId = int.Parse(jwtToken.Claims.First(x => x.Type == ClaimTypes.NameIdentifier).Value);
+            var userIdClaim = jwtToken.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier);
+            
+            if (userIdClaim == null)
+            {
+                _logger.LogWarning("JWT token validation failed: Missing user ID claim. IP: {RemoteIpAddress}", 
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+                return;
+            }
+
+            if (!int.TryParse(userIdClaim.Value, out int userId))
+            {
+                _logger.LogWarning("JWT token validation failed: Invalid user ID format. IP: {RemoteIpAddress}", 
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+                return;
+            }
+
             context.User = principal;
             context.Items["UserId"] = userId;
+            
+            _logger.LogDebug("JWT token successfully validated for user {UserId}", userId);
         }
-        catch
+        catch (SecurityTokenExpiredException)
         {
-            // Do nothing if JWT validation fails
-            // User is not attached to context so request won't have access to secure routes
+            _logger.LogInformation("JWT token validation failed: Token expired. IP: {RemoteIpAddress}", 
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+        }
+        catch (SecurityTokenInvalidSignatureException)
+        {
+            _logger.LogWarning("JWT token validation failed: Invalid signature. Potential security threat. IP: {RemoteIpAddress}", 
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+        }
+        catch (SecurityTokenValidationException ex)
+        {
+            _logger.LogWarning("JWT token validation failed: {ErrorMessage}. IP: {RemoteIpAddress}", 
+                ex.Message, context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during JWT token validation. IP: {RemoteIpAddress}", 
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
         }
     }
 }

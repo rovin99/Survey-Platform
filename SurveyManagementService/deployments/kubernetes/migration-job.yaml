@@ -1,40 +1,37 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: auth-service-migration
+  name: survey-service-migration
   namespace: default
   labels:
-    app: auth-service
+    app: survey-management-service
     component: migration
 spec:
   template:
     metadata:
       labels:
-        app: auth-service
+        app: survey-management-service
         component: migration
     spec:
       containers:
       - name: migrator
-        # Use your published image
-        image: your-registry/auth-service:latest
+        # Use the migration-specific image
+        image: rovin123/survey-service-migrations:v2
         
-        # Override entrypoint to run migrations
-        command: ["dotnet", "ef", "database", "update"]
-        
-        # Load environment variables from ConfigMap and Secret
+        # Environment variables from ConfigMap and Secret
         envFrom:
           - configMapRef:
-              name: auth-service-config
+              name: survey-service-config
           - secretRef:
-              name: auth-service-secrets
+              name: survey-service-secrets
         
         # Resource limits for the migration job
         resources:
           requests:
-            memory: "256Mi"
+            memory: "128Mi"
             cpu: "100m"
           limits:
-            memory: "512Mi"
+            memory: "256Mi"
             cpu: "500m"
             
       restartPolicy: OnFailure
@@ -42,7 +39,7 @@ spec:
       # Security context
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
+        runAsUser: 1001
         
   # Retry policy
   backoffLimit: 3

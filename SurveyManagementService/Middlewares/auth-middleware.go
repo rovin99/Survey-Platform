@@ -83,3 +83,53 @@ func AuthMiddleware() fiber.Handler {
 		return response.Unauthorized(c, "Invalid JWT")
 	}
 }
+
+// ConductorRoleMiddleware ensures the user has "Conducting" role
+func ConductorRoleMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		roles, ok := c.Locals("roles").([]string)
+		if !ok {
+			return response.Unauthorized(c, "No roles found in token")
+		}
+
+		// Check if user has Conducting role
+		hasConductingRole := false
+		for _, role := range roles {
+			if role == "Conducting" {
+				hasConductingRole = true
+				break
+			}
+		}
+
+		if !hasConductingRole {
+			return response.Forbidden(c, "Conducting role required to access this resource")
+		}
+
+		return c.Next()
+	}
+}
+
+// RequireRole middleware factory for specific role requirements
+func RequireRole(requiredRole string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		roles, ok := c.Locals("roles").([]string)
+		if !ok {
+			return response.Unauthorized(c, "No roles found in token")
+		}
+
+		// Check if user has the required role
+		hasRole := false
+		for _, role := range roles {
+			if role == requiredRole {
+				hasRole = true
+				break
+			}
+		}
+
+		if !hasRole {
+			return response.Forbidden(c, fmt.Sprintf("%s role required to access this resource", requiredRole))
+		}
+
+		return c.Next()
+	}
+}

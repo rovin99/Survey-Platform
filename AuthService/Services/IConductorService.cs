@@ -8,9 +8,10 @@ namespace AuthService.Services
     {
         Task RegisterConductorAsync(int userId, ConductorRegistrationRequest request);
         Task<Conductor> GetByIdAsync(int id);
-        
+        Task<Conductor> GetByUserIdAsync(int userId);
         Task UpdateConductorAsync(int id, ConductorUpdateRequest request);
         Task DeleteConductorAsync(int id);
+        Task DeleteByUserIdAsync(int userId);
         Task<(List<Conductor> conductors, int total)> ListConductorsAsync(int page, int limit);
     }
 }

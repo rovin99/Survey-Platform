@@ -83,9 +83,10 @@ public class UserRepository : IUserRepository
 
     public async Task<bool> HasRoleAsync(int userId, string roleName)
     {
+        // Use EF.Functions.Like for case-insensitive comparison that works with the database
         return await _context.UserRoles
             .AnyAsync(ur => ur.UserId == userId && 
-                           ur.Role.RoleName.ToLower() == roleName.ToLower());
+                           EF.Functions.Like(ur.Role.RoleName, roleName));
     }
     // public async Task<User> GetByRefreshTokenAsync(string refreshToken)
     // {

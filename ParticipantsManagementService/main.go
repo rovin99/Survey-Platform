@@ -1,5 +1,6 @@
 package main
 
+// CI/CD Pipeline Test - ParticipantsManagementService updated for end-to-end testing
 import (
 	"fmt"
 	"log"

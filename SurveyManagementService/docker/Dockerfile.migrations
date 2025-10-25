@@ -1,0 +1,111 @@
+# ====================================
+# MIGRATION DOCKERFILE
+# ====================================
+FROM golang:1.23.0-alpine AS migration-builder
+
+# Install necessary packages
+RUN apk add --no-cache git ca-certificates
+
+# Set build environment variables
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
+
+# Create application directory
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Create a migration-specific binary
+RUN cat > migration-main.go << 'EOF'
+package main
+
+import (
+    "log"
+    "os"
+
+    "github.com/joho/godotenv"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
+
+    "github.com/rovin99/Survey-Platform/SurveyManagementService/models"
+)
+
+func main() {
+    // Load environment if .env exists (for local development)
+    if _, err := os.Stat(".env"); err == nil {
+        if err := godotenv.Load(); err != nil {
+            log.Printf("Warning: Error loading .env file: %v", err)
+        }
+    }
+
+    dsn := "host=" + os.Getenv("DB_HOST") +
+        " user=" + os.Getenv("DB_USER") +
+        " password=" + os.Getenv("DB_PASSWORD") +
+        " dbname=" + os.Getenv("DB_NAME") +
+        " port=" + os.Getenv("DB_PORT") +
+        " sslmode=" + os.Getenv("DB_SSLMODE")
+
+    log.Printf("Connecting to database...")
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    if err != nil {
+        log.Fatal("Failed to connect to database:", err)
+    }
+
+    log.Printf("Running database migrations...")
+    err = db.AutoMigrate(
+        &models.Survey{},
+        &models.Question{},
+        &models.Option{},
+        &models.SurveyRequirement{},
+        &models.Answer{},
+        &models.SurveySession{},
+        &models.SurveyMediaFile{},
+        &models.SurveyDraft{},
+        &models.BranchingRule{},
+    )
+    if err != nil {
+        log.Fatal("Migration failed:", err)
+    }
+
+    log.Printf("Database migrations completed successfully!")
+}
+EOF
+
+# Build the migration binary
+RUN go build -o migration-runner migration-main.go
+
+# ====================================
+# MIGRATION RUNTIME
+# ====================================
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+# Create non-root user
+RUN addgroup -g 1001 -S migrationgroup && \
+    adduser -u 1001 -S migrationuser -G migrationgroup
+
+# Set working directory
+WORKDIR /app
+
+# Copy migration binary
+COPY --from=migration-builder /build/migration-runner .
+
+# Change ownership
+RUN chown migrationuser:migrationgroup migration-runner && \
+    chmod +x migration-runner
+
+# Switch to non-root user
+USER migrationuser
+
+# Run migrations
+CMD ["./migration-runner"] 

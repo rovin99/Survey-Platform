@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: survey-service-migration
+  namespace: default
+  labels:
+    app: survey-management-service
+    component: migration
+spec:
+  template:
+    metadata:
+      labels:
+        app: survey-management-service
+        component: migration
+    spec:
+      containers:
+      - name: migrator
+        # Use the migration-specific image
+        image: rovin123/survey-service-migrations:v2
+        
+        # Environment variables from ConfigMap and Secret
+        envFrom:
+          - configMapRef:
+              name: survey-service-config
+          - secretRef:
+              name: survey-service-secrets
+        
+        # Resource limits for the migration job
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+            
+      restartPolicy: OnFailure
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        
+  # Retry policy
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300  # Clean up job after 5 minutes 

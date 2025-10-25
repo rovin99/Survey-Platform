@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: survey-service-config
+  namespace: default
+  labels:
+    app: survey-management-service
+data:
+  # Application Environment
+  ENVIRONMENT: "production"
+  GIN_MODE: "release"
+  
+  # Database Configuration (non-sensitive)
+  DB_HOST: "postgres-db"
+  DB_PORT: "5432"
+  DB_NAME: "SurveyDb"
+  DB_SSLMODE: "require"
+  
+  # JWT Configuration (non-sensitive)
+  JWT_ISSUER: "AuthService"
+  JWT_AUDIENCE: "SurveyApp"
+  
+  # Timezone
+  TZ: "UTC" 

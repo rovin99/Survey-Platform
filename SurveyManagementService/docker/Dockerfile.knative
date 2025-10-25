@@ -1,0 +1,85 @@
+# ====================================
+# BUILD STAGE
+# ====================================
+FROM golang:1.23.0-alpine AS builder
+
+# Install necessary packages for building
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Set build environment variables for static binary
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
+
+# Create application directory
+WORKDIR /build
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+
+# Download dependencies (cached layer if go.mod/go.sum unchanged)
+RUN go mod download && go mod verify
+
+# Copy source code
+COPY . .
+
+# Build the application with optimizations for K-Native
+RUN go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -installsuffix cgo \
+    -o survey-service \
+    ./main.go
+
+# ====================================
+# KNATIVE RUNTIME STAGE
+# ====================================
+FROM alpine:3.19 AS knative
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    curl \
+    dumb-init \
+    && update-ca-certificates
+
+# Create non-root user for security (K-Native best practice)
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/logs /tmp/app /var/tmp/app && \
+    chown -R appuser:appgroup /app /tmp/app /var/tmp/app
+
+# Set working directory
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder /build/survey-service .
+
+# Copy timezone data
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Make binary executable and change ownership
+RUN chmod +x survey-service && \
+    chown appuser:appgroup survey-service
+
+# Switch to non-root user for security
+USER appuser
+
+# Set environment variables for K-Native
+ENV GIN_MODE=release \
+    PORT=8080 \
+    TZ=UTC \
+    GOMEMLIMIT=128MiB
+
+# Expose K-Native standard port
+EXPOSE 8080
+
+# Health check for K-Native probes
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Use dumb-init for proper signal handling in serverless environment
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["./survey-service"] 

@@ -1,0 +1,58 @@
+# Kong Gateway YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kong
+---
+# Kong Rate Limiting Plugin
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: rate-limiting
+  namespace: kong
+plugin: rate-limiting
+config:
+  minute: 100
+  policy: local
+---
+# Kong Ingress Configuration for Knative Auth Service
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: auth-gateway
+  namespace: kong
+  annotations:
+    konghq.com/plugins: rate-limiting
+    konghq.com/strip-path: "true"
+    konghq.com/protocols: "https"
+    konghq.com/https-redirect-status-code: "301"
+spec:
+  ingressClassName: kong
+  rules:
+  - http:
+      paths:
+      - path: /api/auth
+        pathType: Prefix
+        backend:
+          service:
+            name: auth-service
+            port:
+              number: 80
+---
+# Kong Service Configuration
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-proxy
+  namespace: kong
+spec:
+  type: LoadBalancer
+  ports:
+  - name: proxy
+    port: 443
+    targetPort: 8443
+  - name: proxy-http
+    port: 80
+    targetPort: 8000
+  selector:
+    app: kong

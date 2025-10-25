@@ -1,0 +1,16 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+WORKDIR /src
+
+# Copy project file and restore dependencies
+COPY ["AuthService.csproj", "./"]
+RUN dotnet restore
+
+# Copy source code
+COPY . .
+
+# Install EF tools globally
+RUN dotnet tool install --global dotnet-ef
+ENV PATH="$PATH:/root/.dotnet/tools"
+
+# Set the entrypoint to run migrations
+ENTRYPOINT ["dotnet", "ef", "database", "update"] 

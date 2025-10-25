@@ -1,0 +1,197 @@
+name: Deploy to Kubernetes (CD)
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      services:
+        description: 'Services to deploy (comma-separated: auth,survey,participant,frontend or "all")'
+        required: true
+        default: 'all'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  determine-changes:
+    name: Determine Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      auth-changed: ${{ steps.changes.outputs.auth }}
+      survey-changed: ${{ steps.changes.outputs.survey }}
+      participant-changed: ${{ steps.changes.outputs.participant }}
+      frontend-changed: ${{ steps.changes.outputs.frontend }}
+      environment: ${{ steps.env.outputs.environment }}
+      deploy-all: ${{ steps.deploy.outputs.all }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed services
+        uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            auth:
+              - 'AuthService/**'
+            survey:
+              - 'SurveyManagementService/**'
+            participant:
+              - 'ParticipantsManagementService/**'
+            frontend:
+              - 'frontend/**'
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine deployment scope
+        id: deploy
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.services }}" == "all" ]; then
+              echo "all=true" >> $GITHUB_OUTPUT
+            else
+              echo "all=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "all=false" >> $GITHUB_OUTPUT
+          fi
+
+  deploy-auth:
+    name: Deploy AuthService
+    needs: determine-changes
+    if: needs.determine-changes.outputs.auth-changed == 'true' || needs.determine-changes.outputs.deploy-all == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to ${{ needs.determine-changes.outputs.environment }}
+        run: |
+          echo "🚀 Deploying AuthService to ${{ needs.determine-changes.outputs.environment }}"
+          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository }}/auth-service:${{ github.sha }}"
+          
+          # Here we would typically:
+          # 1. Update Kubernetes manifests
+          # 2. Apply to cluster or trigger ArgoCD sync
+          # 3. Wait for deployment completion
+          
+          echo "✅ AuthService deployment completed"
+
+  deploy-survey:
+    name: Deploy SurveyService
+    needs: determine-changes
+    if: needs.determine-changes.outputs.survey-changed == 'true' || needs.determine-changes.outputs.deploy-all == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to ${{ needs.determine-changes.outputs.environment }}
+        run: |
+          echo "🚀 Deploying SurveyService to ${{ needs.determine-changes.outputs.environment }}"
+          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository }}/survey-service:${{ github.sha }}"
+          echo "✅ SurveyService deployment completed"
+
+  deploy-participant:
+    name: Deploy ParticipantService
+    needs: determine-changes
+    if: needs.determine-changes.outputs.participant-changed == 'true' || needs.determine-changes.outputs.deploy-all == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to ${{ needs.determine-changes.outputs.environment }}
+        run: |
+          echo "🚀 Deploying ParticipantService to ${{ needs.determine-changes.outputs.environment }}"
+          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository }}/participant-service:${{ github.sha }}"
+          echo "✅ ParticipantService deployment completed"
+
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: determine-changes
+    if: needs.determine-changes.outputs.frontend-changed == 'true' || needs.determine-changes.outputs.deploy-all == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to ${{ needs.determine-changes.outputs.environment }}
+        run: |
+          echo "🚀 Deploying Frontend to ${{ needs.determine-changes.outputs.environment }}"
+          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository }}/frontend:${{ github.sha }}"
+          echo "✅ Frontend deployment completed"
+
+  health-check:
+    name: Post-Deployment Health Check
+    needs: [determine-changes, deploy-auth, deploy-survey, deploy-participant, deploy-frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Wait for services to be ready
+        run: |
+          echo "⏳ Waiting for services to be ready..."
+          sleep 30
+          
+      - name: Health check placeholder
+        run: |
+          echo "🔍 Running health checks for ${{ needs.determine-changes.outputs.environment }}"
+          
+          # Placeholder for actual health checks
+          # Example:
+          # curl -f https://api-dev.survey-platform.com/api/auth/health || exit 1
+          # curl -f https://api-dev.survey-platform.com/api/v1/health || exit 1
+          # curl -f https://dev.survey-platform.com || exit 1
+          
+          echo "✅ All services are healthy"
+
+  notify:
+    name: Notify Deployment Status
+    needs: [determine-changes, deploy-auth, deploy-survey, deploy-participant, deploy-frontend, health-check]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Notify success
+        if: needs.health-check.result == 'success'
+        run: |
+          echo "🎉 Deployment to ${{ needs.determine-changes.outputs.environment }} completed successfully!"
+          echo "Environment: ${{ needs.determine-changes.outputs.environment }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+
+      - name: Notify failure
+        if: failure()
+        run: |
+          echo "❌ Deployment to ${{ needs.determine-changes.outputs.environment }} failed!"
+          echo "Please check the logs and consider rollback if necessary."

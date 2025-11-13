@@ -12,10 +12,10 @@ import { useAuth } from "@/context/AuthContext";
 import { authService } from "@/services/auth.service";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
 
-export default function MagicLinkPage() {
+function MagicLinkContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { refreshUser, isAuthenticated, user } = useAuth();
@@ -205,5 +205,32 @@ export default function MagicLinkPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function MagicLinkPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="w-[400px]">
+          <CardHeader>
+            <CardTitle>Magic Link Verification</CardTitle>
+            <CardDescription>Loading...</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center space-y-4">
+              <div className="flex justify-center">
+                <Loader2 className="h-12 w-12 text-blue-600 animate-spin" />
+              </div>
+              <p className="text-sm text-gray-600">
+                Preparing verification...
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    }>
+      <MagicLinkContent />
+    </Suspense>
   );
 }

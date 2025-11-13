@@ -1,11 +1,12 @@
 "use client";
 
+import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CheckCircle, Award, Clock, ArrowRight } from "lucide-react";
 
-export default function SurveyCompletePage() {
+function SurveyCompleteContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("sessionId");
@@ -86,3 +87,23 @@ export default function SurveyCompletePage() {
   );
 }
 
+export default function SurveyCompletePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-b from-green-50 to-white flex items-center justify-center p-4">
+        <Card className="max-w-lg w-full shadow-lg">
+          <CardContent className="pt-8 pb-6">
+            <div className="text-center">
+              <div className="inline-flex items-center justify-center w-20 h-20 bg-gray-100 rounded-full mb-4">
+                <Clock className="h-12 w-12 text-gray-400 animate-pulse" />
+              </div>
+              <p className="text-gray-600">Loading...</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    }>
+      <SurveyCompleteContent />
+    </Suspense>
+  );
+}

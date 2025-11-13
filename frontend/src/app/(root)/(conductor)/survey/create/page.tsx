@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { debounce } from 'perfect-debounce';
 import { useAuth } from "@/context/AuthContext";
+import { BranchingLogicBuilder, type BranchingRule } from "@/components/survey/BranchingLogicBuilder";
 
 // Type definitions
 interface Question {
@@ -31,6 +32,7 @@ interface Question {
     options: Option[];
     mandatory: boolean;
     correctAnswers?: string;
+    branchingRules?: BranchingRule[];
     mediaFiles?: Array<{
         id: string;
         url: string;
@@ -1680,6 +1682,41 @@ export default function SurveyCreatePage() {
                                                 + Add Option
                                             </Button>
                                         </div>
+                                    )}
+
+                                    {/* Branching Logic - Only for multiple/single choice */}
+                                    {(question.type === 'multiple-choice' || question.type === 'single-choice') && 
+                                     question.options.some(o => o.text && o.text.trim().length > 0) && (
+                                        <BranchingLogicBuilder
+                                            questionIndex={questions.indexOf(question)}
+                                            options={question.options.map(o => o.text)}
+                                            totalQuestions={questions.length}
+                                            initialRules={question.branchingRules || []}
+                                            onChange={(rules) => {
+                                                // Update UI state
+                                                setQuestions(
+                                                    questions.map((q) =>
+                                                        q.id === question.id
+                                                            ? { ...q, branchingRules: rules }
+                                                            : q
+                                                    )
+                                                );
+                                                
+                                                // Update draft state - convert rules to JSON string
+                                                updateDraft({
+                                                    questions: draft.draftContent.questions.map(q => 
+                                                        q.question_id === parseInt(question.id)
+                                                            ? { 
+                                                                ...q, 
+                                                                branching_logic: rules.length > 0 
+                                                                    ? JSON.stringify({ rules }) 
+                                                                    : "" 
+                                                            }
+                                                            : q
+                                                    )
+                                                });
+                                            }}
+                                        />
                                     )}
                                 </div>
                             ))}

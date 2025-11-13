@@ -178,3 +178,20 @@ func (h *SurveyHandler) PublishDraft(c *fiber.Ctx) error {
 		"surveyId": surveyID,
 	}, "Survey published successfully")
 }
+
+// ListSurveysByConductor retrieves all surveys created by a specific conductor
+func (h *SurveyHandler) ListSurveysByConductor(c *fiber.Ctx) error {
+	// Get conductor ID from URL parameters
+	conductorID, err := c.ParamsInt("conductor_id")
+	if err != nil {
+		return response.BadRequest(c, "Invalid conductor ID")
+	}
+
+	// Get all surveys for this conductor
+	surveys, err := h.surveyService.ListSurveysByConductor(c.Context(), uint(conductorID))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to retrieve surveys")
+	}
+
+	return response.Success(c, surveys, "Surveys retrieved successfully")
+}

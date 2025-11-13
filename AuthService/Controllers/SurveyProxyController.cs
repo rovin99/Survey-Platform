@@ -106,6 +106,18 @@ namespace AuthService.Controllers
             return await ProxyRequest("POST", $"api/v1/drafts/{id}/publish", publishData);
         }
 
+        [HttpGet("surveys/conductor/{conductorId}")]
+        public async Task<IActionResult> GetSurveysByConductor(int conductorId)
+        {
+            return await ProxyRequest("GET", $"api/v1/surveys/conductor/{conductorId}", null);
+        }
+
+        [HttpGet("surveys/{id}")]
+        public async Task<IActionResult> GetSurvey(int id)
+        {
+            return await ProxyRequest("GET", $"api/v1/surveys/{id}", null);
+        }
+
         private async Task<IActionResult> ProxyRequest(string method, string endpoint, object? data)
         {
             try

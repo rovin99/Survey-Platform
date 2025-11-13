@@ -46,6 +46,10 @@ namespace AuthService.Services
     public async Task<(User User, string AccessToken, string RefreshToken)> RegisterUserAsync(string username, string email, string password, string roleName)
     {
         var ipAddress = GetIpAddress();
+        
+        // Normalize email to lowercase to avoid case-sensitivity issues
+        email = email?.ToLowerInvariant() ?? "";
+        
         _logger.LogInformation("User registration attempt started for username: {Username}, email: {Email}, role: {Role}, IP: {IpAddress}", 
             username, email, roleName, ipAddress);
 
@@ -467,6 +471,10 @@ namespace AuthService.Services
         public async Task<string> RequestMagicLinkAsync(string email)
         {
             var ipAddress = GetIpAddress();
+            
+            // Normalize email to lowercase to avoid case-sensitivity issues
+            email = email?.ToLowerInvariant() ?? "";
+            
             _logger.LogInformation("Magic link request started for email: {Email}, IP: {IpAddress}", email, ipAddress);
 
             if (string.IsNullOrEmpty(email))
@@ -553,11 +561,13 @@ namespace AuthService.Services
             else
             {
                 // Create new user if they don't exist
-                user = await _userRepository.GetByEmailAsync(magicLinkToken.Email);
+                // Normalize email to lowercase for comparison
+                var normalizedEmail = magicLinkToken.Email.ToLowerInvariant();
+                user = await _userRepository.GetByEmailAsync(normalizedEmail);
                 if (user == null)
                 {
                     // Extract username from email (before @)
-                    var username = magicLinkToken.Email.Split('@')[0];
+                    var username = normalizedEmail.Split('@')[0];
                     
                     // Ensure username is unique
                     var existingUsername = await _userRepository.GetByUsernameAsync(username);
@@ -569,7 +579,7 @@ namespace AuthService.Services
                     user = new User
                     {
                         Username = username,
-                        Email = magicLinkToken.Email,
+                        Email = normalizedEmail,
                         PasswordHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString()), // Random password
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow

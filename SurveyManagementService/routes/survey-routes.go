@@ -13,6 +13,7 @@ func SetupSurveyRoutes(router fiber.Router, h *handler.SurveyHandler) {
 	survey.Post("/:id/publish", middlewares.ConductorRoleMiddleware(), h.PublishSurvey)
 	survey.Get("/:id/progress", h.GetProgress) // Allow any authenticated user to check progress
 	survey.Get("/:id", h.GetSurvey) // Allow any authenticated user to view surveys
+	survey.Get("/conductor/:conductor_id", h.ListSurveysByConductor) // Get all surveys by conductor
 }
 
 // SetupDraftRoutes registers routes for draft management

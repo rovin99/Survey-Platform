@@ -247,3 +247,6 @@ app.MapControllers();
 app.MapCustomHealthChecks();
 
 app.Run();
+
+// Make Program accessible to integration tests
+public partial class Program { }

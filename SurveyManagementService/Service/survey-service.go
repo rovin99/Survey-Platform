@@ -26,6 +26,7 @@ type SurveyService interface {
 	GetDraft(ctx context.Context, draftID uint) (*models.SurveyDraft, error)
 	PublishDraftToSurvey(ctx context.Context, draftID uint) (uint, error)
 	GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error)
+	ListSurveysByConductor(ctx context.Context, conductorID uint) ([]models.Survey, error)
 }
 
 type SurveyProgress struct {
@@ -378,4 +379,8 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 
 func (s *surveyService) GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error) {
 	return s.surveyDraftRepo.GetLatestDraft(ctx, surveyID)
+}
+
+func (s *surveyService) ListSurveysByConductor(ctx context.Context, conductorID uint) ([]models.Survey, error) {
+	return s.surveyRepo.List(ctx, conductorID)
 }

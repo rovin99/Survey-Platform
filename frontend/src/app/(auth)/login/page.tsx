@@ -107,7 +107,9 @@ export default function LoginPage() {
     setMagicLinkLoading(true);
 
     try {
-      await authService.requestMagicLink(magicLinkData.email);
+      // Normalize email to lowercase to avoid case-sensitivity issues
+      const normalizedEmail = magicLinkData.email.toLowerCase().trim();
+      await authService.requestMagicLink(normalizedEmail);
       setMagicLinkSent(true);
     } catch (err: any) {
       setError(err.message || "Failed to send magic link");

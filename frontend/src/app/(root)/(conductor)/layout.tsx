@@ -1,6 +1,5 @@
 "use client";
 
-import { Navbar } from "@/components/navbar";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthGuard } from "@/components/AuthGuard";
 import { useAuth } from "@/context/AuthContext";
@@ -13,8 +12,7 @@ export default function ConductorLayout({
 	return (
 		<AuthGuard>
 			<ConductorRoleGuard>
-				<main>
-					<Navbar userType="Conductor" />
+				<main className="min-h-screen bg-gray-50">
 					{children}
 					<Toaster />
 				</main>

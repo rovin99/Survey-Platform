@@ -29,10 +29,12 @@ public class UserRepository : IUserRepository
 
     public async Task<User> GetByEmailAsync(string email)
     {
+        // Normalize email to lowercase for case-insensitive comparison
+        var normalizedEmail = email?.ToLowerInvariant() ?? "";
         return await _context.Users
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Email == email);
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
     }
 
     public async Task CreateAsync(User user)

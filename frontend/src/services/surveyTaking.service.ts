@@ -6,9 +6,12 @@ import type {
   SubmitSurveyRequest,
   SubmitSurveyResponse,
 } from "@/types/survey-taking";
+import { surveyConfig, participantsConfig } from "@/lib/api-config";
 
-const SURVEY_API_URL = process.env.NEXT_PUBLIC_SURVEY_API_URL || "http://localhost:3001";
-const PARTICIPANT_API_URL = process.env.NEXT_PUBLIC_PARTICIPANT_API_URL || "http://localhost:8081";
+const SURVEY_API_URL = surveyConfig.baseUrl;
+const SURVEY_HOST = surveyConfig.host;
+const PARTICIPANT_API_URL = participantsConfig.baseUrl;
+const PARTICIPANTS_HOST = participantsConfig.host;
 
 interface ApiResponse<T> {
   success: boolean;
@@ -44,11 +47,12 @@ export const surveyTakingService = {
     if (params?.search) queryParams.append("search", params.search);
 
     const response = await fetch(
-      `${SURVEY_API_URL}/api/v1/surveys/available?${queryParams.toString()}`,
+      `${SURVEY_API_URL}${surveyConfig.paths.available}?${queryParams.toString()}`,
       {
         method: "GET",
         credentials: "include",
         headers: {
+          "Host": SURVEY_HOST,
           "Content-Type": "application/json",
         },
       }
@@ -67,11 +71,12 @@ export const surveyTakingService = {
    */
   async startOrResumeSession(surveyId: number): Promise<SessionResponse> {
     const response = await fetch(
-      `${PARTICIPANT_API_URL}/api/participant/surveys/${surveyId}/session`,
+      `${PARTICIPANT_API_URL}${participantsConfig.paths.session(surveyId.toString())}`,
       {
         method: "POST",
         credentials: "include",
         headers: {
+          "Host": PARTICIPANTS_HOST,
           "Content-Type": "application/json",
         },
       }
@@ -96,11 +101,12 @@ export const surveyTakingService = {
     }
   ): Promise<void> {
     const response = await fetch(
-      `${PARTICIPANT_API_URL}/api/participant/sessions/${sessionId}/draft`,
+      `${PARTICIPANT_API_URL}${participantsConfig.paths.draft(sessionId)}`,
       {
         method: "PUT",
         credentials: "include",
         headers: {
+          "Host": PARTICIPANTS_HOST,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(draftData),
@@ -120,11 +126,12 @@ export const surveyTakingService = {
     submitData: SubmitSurveyRequest
   ): Promise<SubmitSurveyResponse> {
     const response = await fetch(
-      `${PARTICIPANT_API_URL}/api/participant/sessions/${sessionId}/submit`,
+      `${PARTICIPANT_API_URL}${participantsConfig.paths.submit(sessionId)}`,
       {
         method: "POST",
         credentials: "include",
         headers: {
+          "Host": PARTICIPANTS_HOST,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(submitData),

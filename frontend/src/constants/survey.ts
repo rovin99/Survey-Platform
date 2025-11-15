@@ -5,11 +5,15 @@ export const STORAGE_KEYS = {
 } as const;
 
 // API endpoints
+// Note: Use centralized API config from @/lib/api-config instead
+// These are kept for backwards compatibility but should be replaced
 export const API_ENDPOINTS = {
-  BASE_URL: 'http://localhost:3001',
+  // Survey service base URL - use surveyConfig.baseUrl instead
+  BASE_URL: process.env.NEXT_PUBLIC_SURVEY_SERVICE_URL || 'http://localhost:8080',
   DRAFTS: '/api/v1/drafts',
   MEDIA_UPLOAD: '/api/v1/media/upload',
-  CONDUCTOR_CURRENT: 'http://localhost:5171/api/Conductor/current'
+  // Auth service conductor endpoint - use authConfig.paths.conductorRegister instead
+  CONDUCTOR_CURRENT: (process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'http://localhost:8080') + '/api/Conductor/current'
 } as const;
 
 // Timing constants

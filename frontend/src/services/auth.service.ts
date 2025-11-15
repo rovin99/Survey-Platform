@@ -1,4 +1,5 @@
 // src/services/auth.service.ts
+import { authConfig } from '@/lib/api-config';
 
 interface ApiResponse<T> {
 	message: string;
@@ -62,7 +63,9 @@ interface ApiResponse<T> {
   csrfToken?: string; // For login/register responses
   }
   
-  const API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "http://localhost:5171/api/auth";
+  // Use centralized configuration
+  const API_URL = authConfig.baseUrl;
+  const AUTH_HOST = authConfig.host;
   
   export class AuthError extends Error {
 	constructor(
@@ -94,9 +97,10 @@ interface ApiResponse<T> {
 	}
   
 	async register(data: RegisterRequest): Promise<ApiResponse<AuthResponse>> {
-	  const response = await fetch(`${API_URL}/register`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.register}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -122,9 +126,10 @@ interface ApiResponse<T> {
   
 	
 	async login(data: LoginRequest): Promise<ApiResponse<LoginResponse>> {
-	  const response = await fetch(`${API_URL}/login`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.login}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -153,7 +158,7 @@ interface ApiResponse<T> {
 		};
 		
 		localStorage.setItem('user_data', JSON.stringify(userData));
-		console.log('User data stored:', userData);
+		
 	  }
 	
 	  return result;
@@ -169,9 +174,10 @@ interface ApiResponse<T> {
 
 	async isAuthenticated(): Promise<boolean> {
 	  try {
-		const response = await fetch(`${API_URL}/verify`, {
+		const response = await fetch(`${API_URL}${authConfig.paths.verify}`, {
 		  method: 'GET',
 		  headers: {
+			'Host': AUTH_HOST,
 			'Accept': 'application/json',
 		  },
 		  credentials: 'include', // Important for cookies
@@ -215,10 +221,11 @@ interface ApiResponse<T> {
   
 	async logout(): Promise<void> {
 	  try {
-		await fetch(`${API_URL}/logout`, {
+		await fetch(`${API_URL}${authConfig.paths.logout}`, {
 		  method: 'POST',
 		  credentials: 'include',
 		  headers: {
+			'Host': AUTH_HOST,
 			'Accept': 'application/json',
 		  },
 		});
@@ -233,10 +240,11 @@ interface ApiResponse<T> {
 	}
   
 	async refreshToken(): Promise<ApiResponse<string>> {
-	  const response = await fetch(`${API_URL}/refresh-token`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.refreshToken}`, {
 		method: 'POST',
 		credentials: 'include',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Accept': 'application/json',
 		},
 	  });
@@ -257,9 +265,10 @@ interface ApiResponse<T> {
 	}
   
 	async forgotPassword(email: string): Promise<ApiResponse<null>> {
-	  const response = await fetch(`${API_URL}/forgot-password`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.forgotPassword}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -282,9 +291,10 @@ interface ApiResponse<T> {
 	}
   
 	async resetPassword(token: string, password: string): Promise<ApiResponse<null>> {
-	  const response = await fetch(`${API_URL}/reset-password`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.resetPassword}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -307,9 +317,10 @@ interface ApiResponse<T> {
 	}
   
 	async verifyEmail(token: string): Promise<ApiResponse<null>> {
-	  const response = await fetch(`${API_URL}/verify-email`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.verifyEmail}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -332,9 +343,10 @@ interface ApiResponse<T> {
 	}
   
 	async changePassword(oldPassword: string, newPassword: string): Promise<ApiResponse<null>> {
-	  const response = await fetch(`${API_URL}/change-password`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.changePassword}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -357,9 +369,10 @@ interface ApiResponse<T> {
 	}
 
 	async updateProfile(data: Partial<UserResponse>): Promise<ApiResponse<UserResponse>> {
-	  const response = await fetch(`${API_URL}/profile`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.profile}`, {
 		method: 'PUT',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -388,11 +401,10 @@ interface ApiResponse<T> {
 	}
 
 	async registerConductor(data: ConductorRegistrationRequest): Promise<ApiResponse<null>> {
-	  // Use the base URL without /api/auth suffix for conductor endpoint
-	  const baseUrl = API_URL.replace('/api/auth', '');
-	  const response = await fetch(`${baseUrl}/api/Conductor/register`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.conductorRegister}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -415,11 +427,10 @@ interface ApiResponse<T> {
 	}
 
 	async registerParticipant(data: ParticipantRegistrationRequest): Promise<ApiResponse<null>> {
-	  // Use the base URL without /api/auth suffix for participant endpoint
-	  const baseUrl = API_URL.replace('/api/auth', '');
-	  const response = await fetch(`${baseUrl}/api/Participant/register`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.participantRegister}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -442,11 +453,10 @@ interface ApiResponse<T> {
 	}
 
 	async deleteConductorRegistration(): Promise<ApiResponse<null>> {
-	  // Use the base URL without /api/auth suffix for conductor endpoint
-	  const baseUrl = API_URL.replace('/api/auth', '');
-	  const response = await fetch(`${baseUrl}/api/Conductor/current`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.conductorDelete}`, {
 		method: 'DELETE',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},
@@ -469,9 +479,10 @@ interface ApiResponse<T> {
 
 	// Magic Link Authentication
 	async requestMagicLink(email: string): Promise<ApiResponse<string>> {
-	  const response = await fetch(`${API_URL}/request-magic-link`, {
+	  const response = await fetch(`${API_URL}${authConfig.paths.magicLink}`, {
 		method: 'POST',
 		headers: {
+		  'Host': AUTH_HOST,
 		  'Content-Type': 'application/json',
 		  'Accept': 'application/json',
 		},

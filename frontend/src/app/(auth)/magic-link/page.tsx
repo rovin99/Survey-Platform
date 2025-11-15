@@ -39,7 +39,7 @@ function MagicLinkContent() {
         try {
           // Try to get user data from verify endpoint (this also validates cookies)
           const verifyUrl = `${process.env.NEXT_PUBLIC_AUTH_API_URL}/verify`;
-          console.log('Calling verify endpoint:', verifyUrl);
+          
           
           const response = await fetch(verifyUrl, {
             method: 'GET',
@@ -47,8 +47,7 @@ function MagicLinkContent() {
             credentials: 'include',
           });
           
-          console.log('Verify response status:', response.status);
-          console.log('Verify response headers:', Object.fromEntries(response.headers.entries()));
+         
           
           if (response.ok) {
             const result = await response.json();

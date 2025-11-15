@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, FileText, BarChart3, Clock, LogOut, TrendingUp, Users } from "lucide-react";
+import { authConfig } from "@/lib/api-config";
 
 interface Survey {
 	id: number;
@@ -40,8 +41,12 @@ export default function ConductorDashboard({ showParticipantButton = false }: Co
 		try {
 			setLoading(true);
 			// Get conductor ID from user data
-			const conductorResponse = await fetch('http://localhost:5171/api/Conductor/current', {
-				credentials: 'include'
+			const conductorResponse = await fetch(`${authConfig.baseUrl}/api/Conductor/current`, {
+				credentials: 'include',
+				headers: {
+					'Host': authConfig.host,
+					'Content-Type': 'application/json'
+				}
 			});
 
 			if (!conductorResponse.ok) {
@@ -63,8 +68,12 @@ export default function ConductorDashboard({ showParticipantButton = false }: Co
 			console.log('Fetching surveys for conductor ID:', conductorId);
 
 			// Fetch surveys by conductor via AuthService proxy
-			const response = await fetch(`http://localhost:5171/api/SurveyProxy/surveys/conductor/${conductorId}`, {
-				credentials: 'include'
+			const response = await fetch(`${authConfig.baseUrl}/api/SurveyProxy/surveys/conductor/${conductorId}`, {
+				credentials: 'include',
+				headers: {
+					'Host': authConfig.host,
+					'Content-Type': 'application/json'
+				}
 			});
 
 			if (response.ok) {

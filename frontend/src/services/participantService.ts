@@ -1,9 +1,15 @@
 import axios from 'axios';
 import { Survey, Question, ApiResponse } from './surveyService';
+import { participantsConfig } from '@/lib/api-config';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_PARTICIPANT_API_URL || 'http://localhost:8081'; // ParticipantsManagementService port
+const API_BASE_URL = participantsConfig.baseUrl;
+const PARTICIPANTS_HOST = participantsConfig.host;
 
 console.log('Participant API URL:', API_BASE_URL);
+console.log('Participant API Host:', PARTICIPANTS_HOST);
+
+// Configure axios to include Host header
+axios.defaults.headers.common['Host'] = PARTICIPANTS_HOST;
 
 // Types specific to the participant service
 export interface SurveySession {
@@ -47,9 +53,13 @@ export const participantService = {
    */
   async startOrResume(surveyId: string): Promise<StartResumeResponse> {
     try {
-      console.log(`Making API request to: ${API_BASE_URL}/api/participant/surveys/${surveyId}/session`);
+      const url = `${API_BASE_URL}${participantsConfig.paths.session(surveyId)}`;
+      console.log(`Making API request to: ${url}`);
+      console.log(`With Host header: ${PARTICIPANTS_HOST}`);
       const response = await axios.post<StartResumeResponse>(
-        `${API_BASE_URL}/api/participant/surveys/${surveyId}/session`
+        url,
+        {},
+        { headers: { 'Host': PARTICIPANTS_HOST } }
       );
       
       console.log('API Response:', response);
@@ -73,7 +83,8 @@ export const participantService = {
   async getSession(surveyId: string): Promise<StartResumeResponse> {
     try {
       const response = await axios.get<StartResumeResponse>(
-        `${API_BASE_URL}/api/participant/surveys/${surveyId}/session`
+        `${API_BASE_URL}${participantsConfig.paths.session(surveyId)}`,
+        { headers: { 'Host': PARTICIPANTS_HOST } }
       );
       return response.data;
     } catch (error) {
@@ -92,11 +103,9 @@ export const participantService = {
   ): Promise<void> {
     try {
       await axios.put(
-        `${API_BASE_URL}/api/participant/sessions/${sessionId}/draft`,
-        {
-          lastQuestionId,
-          draftAnswers,
-        }
+        `${API_BASE_URL}${participantsConfig.paths.draft(sessionId)}`,
+        { lastQuestionId, draftAnswers },
+        { headers: { 'Host': PARTICIPANTS_HOST } }
       );
     } catch (error) {
       console.error('Error saving draft:', error);
@@ -110,10 +119,9 @@ export const participantService = {
   async submitSurvey(sessionId: number, answers: FinalAnswerInput[]): Promise<void> {
     try {
       await axios.post(
-        `${API_BASE_URL}/api/participant/sessions/${sessionId}/submit`,
-        {
-          answers,
-        }
+        `${API_BASE_URL}${participantsConfig.paths.submit(sessionId)}`,
+        { answers },
+        { headers: { 'Host': PARTICIPANTS_HOST } }
       );
     } catch (error) {
       console.error('Error submitting survey:', error);
@@ -128,7 +136,8 @@ export const participantService = {
     try {
       // Note: This endpoint might need to be implemented in the backend
       const response = await axios.get<ParticipantSurveyDraft>(
-        `${API_BASE_URL}/api/participant/sessions/${sessionId}/draft`
+        `${API_BASE_URL}${participantsConfig.paths.draft(sessionId)}`,
+        { headers: { 'Host': PARTICIPANTS_HOST } }
       );
       return response.data;
     } catch (error) {

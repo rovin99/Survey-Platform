@@ -5,9 +5,11 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { authService } from '@/services/auth.service';
 import { useRouter } from 'next/navigation';
 import { apiService } from '@/services/api.service';
+import { authConfig } from '@/lib/api-config';
 
-// Fallback API URL for dev if env is missing
-const API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:5171/api/auth';
+// Use centralized API configuration
+const API_URL = authConfig.baseUrl + '/api/auth';
+const AUTH_HOST = authConfig.host;
 
 interface AuthContextType {
   user: UserResponse | null;
@@ -41,7 +43,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const response = await fetch(`${API_URL}/verify`, {
           method: 'GET',
-          headers: { Accept: 'application/json' },
+          headers: { 
+            'Host': AUTH_HOST,
+            'Accept': 'application/json' 
+          },
           credentials: 'include',
         });
 

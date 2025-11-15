@@ -23,6 +23,7 @@ import { useRouter } from "next/navigation";
 import { debounce } from 'perfect-debounce';
 import { useAuth } from "@/context/AuthContext";
 import { BranchingLogicBuilder, type BranchingRule } from "@/components/survey/BranchingLogicBuilder";
+import { authConfig } from '@/lib/api-config';
 
 // Type definitions
 interface Question {
@@ -125,7 +126,8 @@ interface ServerResponse {
 
 const STORAGE_KEY = 'currentSurveyDraft';
 const BACKUP_KEY = `${STORAGE_KEY}-backup`;
-const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL?.replace('/api/auth', '') || 'http://localhost:5171'; // Auth service base URL
+const API_BASE_URL = authConfig.baseUrl; // Auth service base URL
+const AUTH_HOST = authConfig.host; // Host header for Kourier routing
 
 // Type for window with requestIdleCallback support
 type WindowWithIdleCallback = Window & {
@@ -725,9 +727,10 @@ export default function SurveyCreatePage() {
 
                 try {
                     // Get current conductor information
-                    const response = await fetch(`http://localhost:5171/api/Conductor/current`, {
+                    const response = await fetch(`${API_BASE_URL}/api/Conductor/current`, {
                         method: 'GET',
                         headers: {
+                            'Host': AUTH_HOST,
                             'Content-Type': 'application/json',
                         },
                         credentials: 'include',

@@ -1,6 +1,11 @@
 import axios from 'axios';
+import { surveyConfig } from '@/lib/api-config';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_SURVEY_API_URL || 'http://localhost:3001';
+const API_BASE_URL = surveyConfig.baseUrl;
+const SURVEY_HOST = surveyConfig.host;
+
+// Configure axios to include Host header
+axios.defaults.headers.common['Host'] = SURVEY_HOST;
 
 export interface Survey {
   id: number;
@@ -46,19 +51,26 @@ export interface ApiResponse<T> {
 
 export const surveyService = {
   async getSurvey(surveyId: string): Promise<Survey> {
-    const response = await axios.get<ApiResponse<Survey>>(`${API_BASE_URL}/api/surveys/${surveyId}`);
+    const response = await axios.get<ApiResponse<Survey>>(
+      `${API_BASE_URL}${surveyConfig.paths.surveyById(surveyId)}`,
+      { headers: { 'Host': SURVEY_HOST } }
+    );
     return response.data.data;
   },
 
   async getProgress(surveyId: string): Promise<SurveyProgress> {
-    const response = await axios.get(`${API_BASE_URL}/api/surveys/${surveyId}/progress`);
+    const response = await axios.get(
+      `${API_BASE_URL}${surveyConfig.paths.progress(surveyId)}`,
+      { headers: { 'Host': SURVEY_HOST } }
+    );
     return response.data;
   },
 
   async submitAnswers(surveyId: string, answers: Answer[]): Promise<void> {
-    await axios.post(`${API_BASE_URL}/api/answers/bulk`, {
-      surveyId,
-      answers,
-    });
+    await axios.post(
+      `${API_BASE_URL}${surveyConfig.paths.answers}`,
+      { surveyId, answers },
+      { headers: { 'Host': SURVEY_HOST } }
+    );
   },
 }; 

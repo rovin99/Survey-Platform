@@ -51,20 +51,19 @@ export default function LoginPage() {
       const hasOnlyUserRole = user.roles.length === 1 && user.roles.includes("User");
       
       if (hasOnlyUserRole) {
-        console.log("User has only 'User' role, redirecting to role selection");
+        
         router.push("/role-selection");
         return;
       }
 
       // Check if user has other roles - if so, go to dashboard
       if (user.roles.length > 1 || !user.roles.includes("User")) {
-        console.log("User has additional roles, redirecting to dashboard");
+        
         router.push("/dashboard");
         return;
       }
 
       // Fallback - redirect to role selection
-      console.log("Fallback: redirecting to role selection");
       router.push("/role-selection");
       
     } catch (error) {

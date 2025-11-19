@@ -3,8 +3,8 @@ package handler
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/service"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Service"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Utils/response"
 )
 
 type QuestionHandler struct {

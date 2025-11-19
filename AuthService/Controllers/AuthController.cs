@@ -60,15 +60,17 @@ namespace AuthService.Controllers
                 // Generate anti-forgery token
                 var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
                 
-                // Cookie options - secure in production, allow HTTP in development
+                // For local HTTP: Use SameSite=Lax (works with HTTP, allows cross-subdomain)
+                // For production HTTPS: Use SameSite=None + Secure=true (most restrictive but works everywhere)
+                var isDevelopment = HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment();
+                
+                // Cookie options - SameSite=Lax for dev (HTTP), SameSite=None for prod (HTTPS)
                 var cookieOptions = new CookieOptions
                 {
-                    HttpOnly = false,
-                    Secure = false,
-                    SameSite = SameSiteMode.None,
-                    Expires = DateTime.UtcNow.AddMinutes(15),
-                    Path = "/",
-                    Domain = "localhost" // add this so http://localhost:3000 can read it
+                    HttpOnly = true,
+                    Secure = !isDevelopment,  // false for dev, true for production
+                    SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None,  // Lax for HTTP, None for HTTPS
+                    Path = "/"
                 };
                 
                 // Set access token in HTTP-only cookie
@@ -151,12 +153,16 @@ namespace AuthService.Controllers
                 // Generate anti-forgery token
                 var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
                 
-                // Cookie options - secure in production, allow HTTP in development
+                // For local HTTP: Use SameSite=Lax (works with HTTP, allows cross-subdomain)
+                // For production HTTPS: Use SameSite=None + Secure=true (most restrictive but works everywhere)
+                var isDevelopment = HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment();
+                
+                // Cookie options - SameSite=Lax for dev (HTTP), SameSite=None for prod (HTTPS)
                 var cookieOptions = new CookieOptions
                 {
                     HttpOnly = true,
-                    Secure = !HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment(),
-                    SameSite = SameSiteMode.Strict,
+                    Secure = !isDevelopment,  // false for dev, true for production
+                    SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None,  // Lax for HTTP, None for HTTPS
                     Path = "/"
                 };
                 
@@ -456,12 +462,16 @@ namespace AuthService.Controllers
                 // Generate new anti-forgery token
                 var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
                 
-                // Cookie options - secure in production, allow HTTP in development
+                // For local HTTP: Use SameSite=Lax (works with HTTP, allows cross-subdomain)
+                // For production HTTPS: Use SameSite=None + Secure=true (most restrictive but works everywhere)
+                var isDevelopment = HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment();
+                
+                // Cookie options - SameSite=Lax for dev (HTTP), SameSite=None for prod (HTTPS)
                 var cookieOptions = new CookieOptions
                 {
                     HttpOnly = true,
-                    Secure = !HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment(),
-                    SameSite = SameSiteMode.Strict,
+                    Secure = !isDevelopment,  // false for dev, true for production
+                    SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None,  // Lax for HTTP, None for HTTPS
                     Path = "/"
                 };
                 
@@ -512,28 +522,28 @@ namespace AuthService.Controllers
                 // Call the LogoutAsync method with refresh token
                 await _authService.LogoutAsync(refreshToken);
                 
-                // Cookie options for clearing - secure in production, allow HTTP in development
+                // Cookie delete options must match how they were set
                 var isDevelopment = HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment();
                 
-                // Clear all auth cookies
+                // Clear all auth cookies (SameSite must match how they were set)
                 Response.Cookies.Delete("accessToken", new CookieOptions 
                 { 
                     Path = "/",
                     Secure = !isDevelopment,
-                    SameSite = SameSiteMode.Strict
+                    SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None
                 });
                 
                 Response.Cookies.Delete("refreshToken", new CookieOptions 
                 { 
                     Path = "/api/auth/refresh",
                     Secure = !isDevelopment,
-                    SameSite = SameSiteMode.Strict
+                    SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None
                 });
                 
                 Response.Cookies.Delete("csrf-token", new CookieOptions 
                 { 
                     Secure = !isDevelopment,
-                    SameSite = SameSiteMode.Strict
+                    SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None
                 });
                 
                 return Ok(ResponseUtil.Success<object>(
@@ -563,7 +573,7 @@ namespace AuthService.Controllers
 
             try
             {
-                var message = await _authService.RequestMagicLinkAsync(request.Email);
+                var message = await _authService.RequestMagicLinkAsync(request.Email, request.ReturnUrl);
                 return Ok(ResponseUtil.Success(message, "Magic link request processed"));
             }
             catch (Exception ex)
@@ -578,7 +588,7 @@ namespace AuthService.Controllers
         }
 
         [HttpGet("verify-magic-link")]
-        public async Task<ActionResult> VerifyMagicLink([FromQuery] string token)
+        public async Task<ActionResult> VerifyMagicLink([FromQuery] string token, [FromQuery] string? returnUrl)
         {
             if (string.IsNullOrEmpty(token))
             {
@@ -592,12 +602,16 @@ namespace AuthService.Controllers
                 // Generate anti-forgery token
                 var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
                 
-                // Cookie options - secure in production, allow HTTP in development
+                // For local HTTP: Use SameSite=Lax (works with HTTP, allows cross-subdomain)
+                // For production HTTPS: Use SameSite=None + Secure=true (most restrictive but works everywhere)
+                var isDevelopment = HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment();
+                
+                // Cookie options - SameSite=Lax for dev (HTTP), SameSite=None for prod (HTTPS)
                 var cookieOptions = new CookieOptions
                 {
                     HttpOnly = true,
-                    Secure = !HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment(),
-                    SameSite = SameSiteMode.Strict,
+                    Secure = !isDevelopment,  // false for dev, true for production
+                    SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None,  // Lax for HTTP, None for HTTPS
                     Path = "/"
                 };
                 
@@ -638,7 +652,12 @@ namespace AuthService.Controllers
                 
                 // Redirect to magic link verification page with success status
                 // This allows the frontend to handle the authentication state properly
-                return Redirect($"{GetFrontendUrl()}/magic-link?status=success&userId={user.UserId}");
+                var redirectUrl = $"{GetFrontendUrl()}/magic-link?status=success&userId={user.UserId}";
+                if (!string.IsNullOrEmpty(returnUrl))
+                {
+                    redirectUrl += $"&returnUrl={Uri.EscapeDataString(returnUrl)}";
+                }
+                return Redirect(redirectUrl);
             }
             catch (Exception ex)
             {
@@ -665,12 +684,16 @@ namespace AuthService.Controllers
                 // Generate anti-forgery token
                 var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
                 
-                // Cookie options - secure in production, allow HTTP in development
+                // For local HTTP: Use SameSite=Lax (works with HTTP, allows cross-subdomain)
+                // For production HTTPS: Use SameSite=None + Secure=true (most restrictive but works everywhere)
+                var isDevelopment = HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment();
+                
+                // Cookie options - SameSite=Lax for dev (HTTP), SameSite=None for prod (HTTPS)
                 var cookieOptions = new CookieOptions
                 {
                     HttpOnly = true,
-                    Secure = !HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment(),
-                    SameSite = SameSiteMode.Strict,
+                    Secure = !isDevelopment,  // false for dev, true for production
+                    SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None,  // Lax for HTTP, None for HTTPS
                     Path = "/"
                 };
                 
@@ -738,7 +761,14 @@ namespace AuthService.Controllers
 
         private string GetFrontendUrl()
         {
-            // Default to localhost in development
+            // Check for FRONTEND_URL environment variable first (for cluster deployments)
+            var frontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL");
+            if (!string.IsNullOrEmpty(frontendUrl))
+            {
+                return frontendUrl;
+            }
+            
+            // Fallback: Development vs Production
             return HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment() 
                 ? "http://localhost:3000" 
                 : Environment.GetEnvironmentVariable("PRODUCTION_URL") ?? "http://localhost:3000";
@@ -748,6 +778,7 @@ namespace AuthService.Controllers
     public class MagicLinkRequest
     {
         public string Email { get; set; } = string.Empty;
+        public string? ReturnUrl { get; set; }
     }
 
     public class LoginResponseDTO

@@ -18,21 +18,34 @@ func SetupParticipantRoutes(app *fiber.App, participantHandler *handler.Particip
 	// Group routes specific to participant actions
 	participantGroup := app.Group("/api/participant")
 
-	// Apply authentication middleware to all participant routes
-	// Make sure your middleware sets c.Locals("participantId")
-	participantGroup.Use(middleware.AuthMiddleware()) // Replace with your actual auth middleware
+	// Apply authentication middleware to authenticated routes only
+	authGroup := participantGroup.Group("")
+	authGroup.Use(middleware.AuthMiddleware()) // Authenticated routes
 
-	// Route to start or resume a survey session for a specific survey
-	participantGroup.Post("/surveys/:surveyId/session", participantHandler.HandleStartOrResumeSurvey)
+	// Route to start or resume a survey session for a specific survey (authenticated)
+	authGroup.Post("/surveys/:surveyId/session", participantHandler.HandleStartOrResumeSurvey)
 
-	// GET endpoint for session data
-	participantGroup.Get("/surveys/:surveyId/session", participantHandler.HandleGetSession)
+	// GET endpoint for session data (authenticated)
+	authGroup.Get("/surveys/:surveyId/session", participantHandler.HandleGetSession)
 
-	// Route to save the draft for a specific session
-	participantGroup.Put("/sessions/:sessionId/draft", participantHandler.HandleSaveDraft)
+	// Analytics/Results routes (authenticated - for conductors)
+	authGroup.Get("/surveys/:surveyId/results", participantHandler.HandleGetSurveyResults)
+	authGroup.Get("/sessions/:sessionId/responses", participantHandler.HandleGetSessionResponses)
 
-	// Route to submit the final answers for a specific session
-	participantGroup.Post("/sessions/:sessionId/submit", participantHandler.HandleSubmitSurvey)
+	// Public routes (no authentication middleware) - for anonymous survey taking
+	publicGroup := participantGroup.Group("")
+	// No auth middleware applied to public routes
+
+	// Route to start a session via share link (public access with token validation)
+	publicGroup.Post("/surveys/public/start", participantHandler.HandleStartSessionViaShareLink)
+
+	// Routes for draft and submit - these work with session cookies for anonymous users
+	publicGroup.Put("/sessions/:sessionId/draft", participantHandler.HandleSaveDraft)
+	publicGroup.Post("/sessions/:sessionId/submit", participantHandler.HandleSubmitSurvey)
+
+	// Quiz evaluation routes (public - can be called after quiz submission)
+	publicGroup.Post("/sessions/:sessionId/evaluate", participantHandler.HandleEvaluateQuiz)
+	publicGroup.Get("/sessions/:sessionId/quiz-results", participantHandler.HandleEvaluateQuiz)
 
 	// Optional: Add routes to GET session or draft details if needed directly
 	// participantGroup.Get("/sessions/:sessionId/draft", participantHandler.HandleGetDraft)   // Needs handler implementation

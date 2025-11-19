@@ -3,7 +3,15 @@ kind: ConfigMap
 metadata:
   name: auth-service-config
 data:
-  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_ENVIRONMENT: "Development"
   JWT_ISSUER: "AuthService"
   JWT_AUDIENCE: "SurveyApp"
   JWT_DURATION: "60"
+  # Public URL for magic links and email links
+  APP_BASE_URL: "http://auth-service.default.127.0.0.1.nip.io:8080"
+  # Email Service Configuration (uses SurveyManagementService)
+  EmailService__UseExternalService: "true"
+  EmailService__BaseUrl: "http://survey-management-service.default.svc.cluster.local/api"
+  EmailService__TimeoutSeconds: "30"
+  # Survey Service Configuration (for SurveyProxy)
+  SurveyService__BaseUrl: "http://survey-management-service.default.svc.cluster.local"

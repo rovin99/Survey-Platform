@@ -12,6 +12,14 @@ type Survey struct {
 	Description       string              `json:"description"`
 	IsSelfRecruitment bool                `json:"is_self_recruitment"`
 	Status            string              `json:"status"`
+	IsShareable       bool                `json:"is_shareable" gorm:"default:false"`
+	ShareEnabledAt    *time.Time          `json:"share_enabled_at,omitempty"`
+	// Quiz-specific fields
+	IsQuiz                  bool   `json:"is_quiz" gorm:"default:false"`
+	TimeLimitMinutes        *int   `json:"time_limit_minutes,omitempty"`
+	PassingScorePercentage  *int   `json:"passing_score_percentage,omitempty"`
+	ShowCorrectAnswers      bool   `json:"show_correct_answers" gorm:"default:true"`
+	ShuffleQuestions        bool   `json:"shuffle_questions" gorm:"default:false"`
 	Questions         []Question          `json:"questions,omitempty" gorm:"foreignKey:SurveyID"`
 	Requirements      []SurveyRequirement `json:"requirements,omitempty" gorm:"foreignKey:SurveyID"`
 	CreatedAt         time.Time           `json:"created_at"`
@@ -27,6 +35,8 @@ type Question struct {
 	CorrectAnswers string    `json:"correct_answers"` // Comma-separated IDs or JSON string for multiple correct answers
 	BranchingLogic string    `json:"branching_logic"` // JSON string or nullable field
 	Mandatory      bool      `json:"mandatory"`
+	Points         int       `json:"points" gorm:"default:1"` // Quiz: points for this question
+	Explanation    string    `json:"explanation"` // Quiz: explanation for correct answer
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

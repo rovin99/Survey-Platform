@@ -59,6 +59,15 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Configure forwarded headers for proxy support (ngrok, Kourier)
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();   // Trust all networks
+    options.KnownProxies.Clear();    // Trust all proxies
+});
+
 // Add services to the container.
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -76,11 +85,11 @@ builder.Services.AddAntiforgery(options =>
 {
     options.Cookie.Name = "csrf-token";
     options.Cookie.HttpOnly = false; // Allow JavaScript access
-    options.Cookie.SameSite = SameSiteMode.Strict;
-    // Allow HTTP in development, require HTTPS in production
+    options.Cookie.SameSite = SameSiteMode.None;  // Allow cross-site for cross-subdomain
+    // Only require HTTPS in production, not in development (local uses HTTP)
     options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() 
-        ? CookieSecurePolicy.None 
-        : CookieSecurePolicy.Always;
+        ? CookieSecurePolicy.None  // Allow HTTP in development
+        : CookieSecurePolicy.Always;  // Require HTTPS in production
     options.HeaderName = "X-CSRF-TOKEN";
 });
 builder.Services.AddScoped<IAuthService, AuthenticationService>();
@@ -113,7 +122,21 @@ builder.Services.AddCors(options =>
         if (builder.Environment.IsDevelopment())
         {
             // For local development, allow these specific origins.
-            policy.WithOrigins("http://localhost:3000", "http://localhost:5000", "http://localhost:5001", "http://localhost:8080","http://localhost:8081", "http://localhost:3001")
+            policy.WithOrigins(
+                    "http://localhost:3000", 
+                    "http://localhost:5000", 
+                    "http://localhost:5001", 
+                    "http://localhost:8080",
+                    "http://localhost:8081", 
+                    "http://localhost:3001",
+                    // Kubernetes cluster URLs
+                    "http://frontend.default.127.0.0.1.nip.io:8080",
+                    "http://auth-service.default.127.0.0.1.nip.io:8080",
+                    "http://survey-management-service.default.127.0.0.1.nip.io:8080",
+                    "http://participants-management-service.default.127.0.0.1.nip.io:8080",
+                    // ngrok public URL (HTTPS)
+                    "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
+                  )
                   .AllowAnyHeader()
                   .AllowAnyMethod()
                   .AllowCredentials();
@@ -216,8 +239,22 @@ if (app.Environment.IsDevelopment())
 
 // app.UseHttpsRedirection();
 
+// Configure forwarded headers to detect HTTPS from proxies (ngrok, Kourier)
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | 
+                      Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+});
+
 // Add CORS middleware - this must be called before Authentication and Authorization
-app.UseCors("AllowFrontend");
+app.UseCors("ConfiguredCorsPolicy");
+
+// Configure cookie policy to allow cross-site cookies
+app.UseCookiePolicy(new CookiePolicyOptions
+{
+    MinimumSameSitePolicy = SameSiteMode.None,
+    Secure = CookieSecurePolicy.Always
+});
 
 // Add rate limiting middleware
 // app.UseRateLimiter(); // Temporarily removed

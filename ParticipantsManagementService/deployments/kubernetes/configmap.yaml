@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: participants-service-config
+  namespace: default
+  labels:
+    app: participants-management-service
+data:
+  # Application Environment
+  APP_ENV: "production"
+  GIN_MODE: "release"
+  
+  # Database Configuration (non-sensitive)
+  DB_HOST: "postgres-db.database.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "SurveyDb"
+  DB_SSLMODE: "disable"
+  
+  # Service Port (Knative will override with PORT env var)
+  PORT: "8080"
+  
+  # Timezone
+  TZ: "UTC"
+  
+  # CORS Configuration
+  CORS_ORIGINS: "http://localhost:3000,https://your-production-domain.com"
+  
+  # Logging
+  LOG_LEVEL: "info"
+

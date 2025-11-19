@@ -29,7 +29,7 @@ spec:
       containers:
       - name: survey-service
         # Updated application image
-        image: rovin123/survey-management-service:v2
+        image: rovin123/survey-management-service:v1
         
         # Enhanced security context for K-Native
         securityContext:

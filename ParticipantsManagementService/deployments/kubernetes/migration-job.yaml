@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: participants-service-migration
+  namespace: default
+  labels:
+    app: participants-management-service
+    component: migration
+spec:
+  template:
+    metadata:
+      labels:
+        app: participants-management-service
+        component: migration
+    spec:
+      containers:
+      - name: migrator
+        # Use the migration-specific image
+        image: rovin123/participants-service-migrations:v1
+        
+        # Environment variables from ConfigMap and Secret
+        envFrom:
+          - configMapRef:
+              name: participants-service-config
+          - secretRef:
+              name: participants-service-secrets
+        
+        # Resource limits for the migration job
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+            
+      restartPolicy: OnFailure
+        
+  # Retry policy
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300  # Clean up job after 5 minutes
+

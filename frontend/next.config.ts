@@ -12,6 +12,16 @@ const getApiUrls = () => {
 		'http://localhost:3001',
 		'http://localhost:8080',
 		'ws://localhost:3001',
+		// Cluster URLs (nip.io)
+		'http://*.127.0.0.1.nip.io:8080',  // Allow all .nip.io services
+		'ws://*.127.0.0.1.nip.io:8080',    // WebSocket support
+		'http://frontend.default.127.0.0.1.nip.io:8080',
+		'http://auth-service.default.127.0.0.1.nip.io:8080',
+		'http://survey-management-service.default.127.0.0.1.nip.io:8080',
+		'http://participants-management-service.default.127.0.0.1.nip.io:8080',
+		// ngrok public URL (HTTPS)
+		'https://trypanosomic-tamisha-imbricately.ngrok-free.dev',
+		'https://*.ngrok-free.dev',  // Allow all ngrok subdomains
 	];
 	
 	// Add environment-based API URLs
@@ -28,17 +38,13 @@ const getApiUrls = () => {
 		urls.push(process.env.NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL);
 	}
 	
-	// Add ngrok free domain pattern (allow all ngrok URLs)
-	urls.push('https://*.ngrok-free.app');
-	urls.push('https://*.ngrok-free.dev');
-	urls.push('https://*.ngrok.app');
-	urls.push('https://*.ngrok.io');
-	
 	// Remove duplicates
 	return [...new Set(urls)].join(' ');
 };
 
 const nextConfig: NextConfig = {
+	// Enable standalone output for Docker
+	output: 'standalone',
 	eslint: {
 		ignoreDuringBuilds: true, // Ignore ESLint warnings during build
 	},

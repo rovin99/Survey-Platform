@@ -468,13 +468,13 @@ namespace AuthService.Services
         }
 
         // Magic Link Authentication Methods
-        public async Task<string> RequestMagicLinkAsync(string email)
+        public async Task<string> RequestMagicLinkAsync(string email, string? returnUrl = null)
         {
             var ipAddress = GetIpAddress();
-            
+
             // Normalize email to lowercase to avoid case-sensitivity issues
             email = email?.ToLowerInvariant() ?? "";
-            
+
             _logger.LogInformation("Magic link request started for email: {Email}, IP: {IpAddress}", email, ipAddress);
 
             if (string.IsNullOrEmpty(email))
@@ -503,9 +503,19 @@ namespace AuthService.Services
             await _magicLinkTokenRepository.CreateAsync(magicLinkToken);
 
             // Generate magic link URL
-            var baseUrl = _httpContextAccessor.HttpContext?.Request?.Scheme + "://" + 
+            // Use APP_BASE_URL from environment if available, otherwise fall back to request host
+            var baseUrl = Environment.GetEnvironmentVariable("APP_BASE_URL");
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                baseUrl = _httpContextAccessor.HttpContext?.Request?.Scheme + "://" +
                          _httpContextAccessor.HttpContext?.Request?.Host;
+            }
             var magicLink = $"{baseUrl}/api/auth/verify-magic-link?token={Uri.EscapeDataString(token)}";
+            if (!string.IsNullOrEmpty(returnUrl))
+            {
+                magicLink += $"&returnUrl={Uri.EscapeDataString(returnUrl)}";
+            }
+            _logger.LogInformation("Generated magic link with base URL: {BaseUrl}", baseUrl);
 
             // Send email
             try

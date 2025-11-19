@@ -34,6 +34,14 @@ type ParticipantRepository interface {
 	CreateAnswersBatch(ctx context.Context, answers []models.Answer) error
 	// GetDB returns the underlying gorm.DB instance
 	GetDB() *gorm.DB
+	// Gets all sessions for a survey (for analytics)
+	GetSessionsBySurveyID(ctx context.Context, surveyID uint) ([]models.SurveySession, error)
+	// Gets all completed sessions for a survey
+	GetCompletedSessionsBySurveyID(ctx context.Context, surveyID uint) ([]models.SurveySession, error)
+	// Gets all answers for a session
+	GetAnswersBySessionID(ctx context.Context, sessionID uint) ([]models.Answer, error)
+	// Gets all answers for a survey (across all sessions)
+	GetAnswersBySurveyID(ctx context.Context, surveyID uint) ([]models.Answer, error)
 }
 
 type gormParticipantRepository struct {
@@ -164,4 +172,45 @@ func (r *gormParticipantRepository) CreateAnswersBatch(ctx context.Context, answ
 		return nil // Nothing to insert
 	}
 	return r.db.WithContext(ctx).Create(&answers).Error
+}
+
+// GetSessionsBySurveyID retrieves all sessions for a specific survey
+func (r *gormParticipantRepository) GetSessionsBySurveyID(ctx context.Context, surveyID uint) ([]models.SurveySession, error) {
+	var sessions []models.SurveySession
+	err := r.db.WithContext(ctx).
+		Where("survey_id = ?", surveyID).
+		Order("created_at DESC").
+		Find(&sessions).Error
+	return sessions, err
+}
+
+// GetCompletedSessionsBySurveyID retrieves all completed sessions for a specific survey
+func (r *gormParticipantRepository) GetCompletedSessionsBySurveyID(ctx context.Context, surveyID uint) ([]models.SurveySession, error) {
+	var sessions []models.SurveySession
+	err := r.db.WithContext(ctx).
+		Where("survey_id = ? AND session_status = ?", surveyID, "COMPLETED").
+		Order("created_at DESC").
+		Find(&sessions).Error
+	return sessions, err
+}
+
+// GetAnswersBySessionID retrieves all answers for a specific session
+func (r *gormParticipantRepository) GetAnswersBySessionID(ctx context.Context, sessionID uint) ([]models.Answer, error) {
+	var answers []models.Answer
+	err := r.db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Order("question_id ASC").
+		Find(&answers).Error
+	return answers, err
+}
+
+// GetAnswersBySurveyID retrieves all answers for a survey across all completed sessions
+func (r *gormParticipantRepository) GetAnswersBySurveyID(ctx context.Context, surveyID uint) ([]models.Answer, error) {
+	var answers []models.Answer
+	err := r.db.WithContext(ctx).
+		Joins("JOIN survey_sessions ON answers.session_id = survey_sessions.session_id").
+		Where("survey_sessions.survey_id = ? AND survey_sessions.session_status = ?", surveyID, "COMPLETED").
+		Order("answers.created_at DESC").
+		Find(&answers).Error
+	return answers, err
 }

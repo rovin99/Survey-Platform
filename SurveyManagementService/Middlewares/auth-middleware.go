@@ -9,7 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Utils/response"
 )
 
 func AuthMiddleware() fiber.Handler {
@@ -58,6 +58,17 @@ func AuthMiddleware() fiber.Handler {
 				return response.Unauthorized(c, "Invalid token: sub claim is not a valid user ID")
 			}
 
+			// Extract conductor ID if present (for Conducting role)
+			// Use conductorId as userId for survey operations
+			var effectiveUserId uint = uint(userId)
+			if conductorIdClaim, ok := claims["conductorId"].(string); ok {
+				conductorId, err := strconv.ParseUint(conductorIdClaim, 10, 64)
+				if err == nil {
+					effectiveUserId = uint(conductorId)
+					log.Printf("Using conductorId %d for survey operations (userId: %d)", conductorId, userId)
+				}
+			}
+
 			// Extract roles
 			roles, ok := claims["role"].([]interface{})
 			if !ok {
@@ -77,7 +88,7 @@ func AuthMiddleware() fiber.Handler {
 				c.Locals("roles", roleStrings)
 			}
 
-			c.Locals("user_id", uint(userId))
+			c.Locals("userId", effectiveUserId)
 			return c.Next()
 		}
 

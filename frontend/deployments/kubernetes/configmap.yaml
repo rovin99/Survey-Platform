@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+data:
+  # Use ngrok public URL (all requests go through ngrok tunnel)
+  # ngrok → Kourier → Services (with Host header routing)
+  NEXT_PUBLIC_API_BASE_URL: "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
+  NEXT_PUBLIC_AUTH_SERVICE_URL: "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
+  NEXT_PUBLIC_SURVEY_SERVICE_URL: "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
+  NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL: "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
+  
+  # Host headers for Kourier routing (used by api-config.ts)
+  NEXT_PUBLIC_AUTH_HOST: "auth-service.default.127.0.0.1.nip.io"
+  NEXT_PUBLIC_SURVEY_HOST: "survey-management-service.default.127.0.0.1.nip.io"
+  NEXT_PUBLIC_PARTICIPANTS_HOST: "participants-management-service.default.127.0.0.1.nip.io"
+  NEXT_PUBLIC_FRONTEND_HOST: "frontend.default.127.0.0.1.nip.io"
+

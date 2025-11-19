@@ -1,0 +1,40 @@
+# Ignore local environment files (these should come from Kubernetes ConfigMap)
+.env.local
+.env*.local
+
+# Node modules (will be installed during build)
+node_modules
+npm-debug.log*
+
+# Next.js build output
+.next
+out
+
+# Testing
+coverage
+.jest-cache
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Logs
+*.log
+logs
+
+# Temporary files
+*.tmp
+.cache
+

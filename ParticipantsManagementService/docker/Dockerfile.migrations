@@ -1,0 +1,178 @@
+# ====================================
+# MIGRATION DOCKERFILE
+# ====================================
+FROM golang:1.24.0-alpine AS migration-builder
+
+# Install necessary packages
+RUN apk add --no-cache git ca-certificates
+
+# Set build environment variables
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
+
+# Create application directory
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Create a migration-specific binary
+RUN cat > migration-main.go << 'EOF'
+package main
+
+import (
+    "fmt"
+    "log"
+    "os"
+    "time"
+
+    "github.com/joho/godotenv"
+    "gorm.io/datatypes"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
+)
+
+// Model definitions for migration
+type SurveySession struct {
+    SessionID      uint      `gorm:"primaryKey;column:session_id"`
+    SurveyID       uint      `gorm:"column:survey_id;not null;index"`
+    ParticipantID  uint      `gorm:"column:participant_id;not null;index"`
+    LastQuestionID *uint     `gorm:"column:last_question_id"`
+    SessionStatus  string    `gorm:"column:session_status;not null;index"`
+    CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime"`
+    UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (SurveySession) TableName() string {
+    return "survey_sessions"
+}
+
+type Answer struct {
+    AnswerID     uint            `gorm:"primaryKey;column:answer_id"`
+    SessionID    uint            `gorm:"column:session_id;not null;index"`
+    QuestionID   uint            `gorm:"column:question_id;not null;index"`
+    ResponseData datatypes.JSON  `gorm:"column:response_data;type:jsonb"`
+    CreatedAt    time.Time       `gorm:"column:created_at;autoCreateTime"`
+    UpdatedAt    time.Time       `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (Answer) TableName() string {
+    return "answers"
+}
+
+type ParticipantSurveyDraft struct {
+    ParticipantDraftID     uint            `gorm:"primaryKey;column:participant_draft_id"`
+    SessionID              uint            `gorm:"column:session_id;not null;uniqueIndex:uq_psd_session"`
+    LastAnsweredQuestionID *uint           `gorm:"column:last_answered_question_id"`
+    DraftAnswersContent    datatypes.JSON  `gorm:"column:draft_answers_content;type:jsonb"`
+    LastSaved              time.Time       `gorm:"column:last_saved;not null"`
+    CreatedAt              time.Time       `gorm:"column:created_at;autoCreateTime"`
+    UpdatedAt              time.Time       `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (ParticipantSurveyDraft) TableName() string {
+    return "participant_survey_drafts"
+}
+
+type SurveyMediaFile struct {
+    MediaID    uint      `gorm:"primaryKey;column:media_id"`
+    SessionID  uint      `gorm:"column:session_id;not null;index"`
+    SurveyID   uint      `gorm:"column:survey_id;index"`
+    QuestionID uint      `gorm:"column:question_id;index"`
+    FileURL    string    `gorm:"column:file_url;not null"`
+    FileType   string    `gorm:"column:file_type;not null"`
+    CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime"`
+    UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (SurveyMediaFile) TableName() string {
+    return "survey_media_files"
+}
+
+func main() {
+    // Load environment if .env exists (for local development)
+    if _, err := os.Stat(".env"); err == nil {
+        if err := godotenv.Load(); err != nil {
+            log.Printf("Warning: Error loading .env file: %v", err)
+        }
+    }
+
+    // Get database configuration from environment
+    dbHost := getEnv("DB_HOST", "localhost")
+    dbUser := getEnv("DB_USER", "postgres")
+    dbPassword := getEnv("DB_PASSWORD", "postgres123")
+    dbName := getEnv("DB_NAME", "SurveyDb")
+    dbPort := getEnv("DB_PORT", "5432")
+    dbSSLMode := getEnv("DB_SSLMODE", "disable")
+
+    dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
+        dbHost, dbUser, dbPassword, dbName, dbPort, dbSSLMode)
+
+    log.Printf("Connecting to database: host=%s dbname=%s user=%s port=%s", 
+        dbHost, dbName, dbUser, dbPort)
+    
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    if err != nil {
+        log.Fatal("Failed to connect to database:", err)
+    }
+
+    log.Printf("Running database migrations for ParticipantsManagementService...")
+    err = db.AutoMigrate(
+        &SurveySession{},
+        &Answer{},
+        &ParticipantSurveyDraft{},
+        &SurveyMediaFile{},
+    )
+    if err != nil {
+        log.Fatal("Migration failed:", err)
+    }
+
+    log.Printf("✅ Database migrations completed successfully!")
+}
+
+func getEnv(key, defaultValue string) string {
+    if value := os.Getenv(key); value != "" {
+        return value
+    }
+    return defaultValue
+}
+EOF
+
+# Build the migration binary
+RUN go build -o migration-runner migration-main.go
+
+# ====================================
+# MIGRATION RUNTIME
+# ====================================
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+# Create non-root user
+RUN addgroup -g 1001 -S migrationgroup && \
+    adduser -u 1001 -S migrationuser -G migrationgroup
+
+# Set working directory
+WORKDIR /app
+
+# Copy migration binary
+COPY --from=migration-builder /build/migration-runner .
+
+# Change ownership
+RUN chown migrationuser:migrationgroup migration-runner && \
+    chmod +x migration-runner
+
+# Switch to non-root user
+USER migrationuser
+
+# Run migrations
+CMD ["./migration-runner"]
+

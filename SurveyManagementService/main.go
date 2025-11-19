@@ -20,9 +20,9 @@ import (
 	middlewares "github.com/rovin99/Survey-Platform/SurveyManagementService/Middlewares"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/handler"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/routes"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/service"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Service"
 )
 
 func setupDatabase() (*gorm.DB, error) {
@@ -65,6 +65,8 @@ func setupDatabase() (*gorm.DB, error) {
 		&models.SurveyMediaFile{},
 		&models.SurveyDraft{},
 		&models.BranchingRule{},
+		&models.SurveyAccessControl{},
+		&models.SurveyAccessLog{},
 	)
 	if err != nil {
 		return nil, err
@@ -89,6 +91,7 @@ type AllRepositories struct {
 	OptionRepo      repository.OptionRepository
 	AnswerRepo      repository.AnswerRepository
 	SessionRepo     repository.SurveySessionRepository
+	AccessRepo      repository.SurveyAccessRepository
 }
 
 type AllServices struct {
@@ -96,6 +99,7 @@ type AllServices struct {
 	QuestionService service.QuestionService
 	OptionService   service.OptionService
 	AnswerService   service.AnswerService
+	AccessService   service.SurveyAccessService
 }
 
 type AllHandlers struct {
@@ -104,6 +108,7 @@ type AllHandlers struct {
 	OptionHandler   *handler.OptionHandler
 	AnswerHandler   *handler.AnswerHandler
 	EmailHandler    *handler.EmailHandler
+	AccessHandler   *handler.SurveyAccessHandler
 }
 
 func setupRepositories(db *gorm.DB) AllRepositories {
@@ -114,6 +119,7 @@ func setupRepositories(db *gorm.DB) AllRepositories {
 		OptionRepo:      repository.NewOptionRepository(db),
 		AnswerRepo:      repository.NewAnswerRepository(db),
 		SessionRepo:     repository.NewSurveySessionRepository(db),
+		AccessRepo:      repository.NewSurveyAccessRepository(db),
 	}
 }
 
@@ -123,18 +129,20 @@ func setupServices(repos AllRepositories) AllServices {
 		QuestionService: service.NewQuestionService(repos.QuestionRepo, repos.OptionRepo, repos.SurveyRepo),
 		OptionService:   service.NewOptionService(repos.OptionRepo),
 		AnswerService:   service.NewAnswerService(repos.AnswerRepo, repos.QuestionRepo, repos.SessionRepo),
+		AccessService:   service.NewSurveyAccessService(repos.AccessRepo, repos.SurveyRepo),
 	}
 }
 
 func setupHandlers(services AllServices) AllHandlers {
 	emailService := service.NewEmailService()
-	
+
 	return AllHandlers{
 		SurveyHandler:   handler.NewSurveyHandler(services.SurveyService),
 		QuestionHandler: handler.NewQuestionHandler(services.QuestionService),
 		OptionHandler:   handler.NewOptionHandler(services.OptionService),
 		AnswerHandler:   handler.NewAnswerHandler(services.AnswerService),
 		EmailHandler:    handler.NewEmailHandler(emailService),
+		AccessHandler:   handler.NewSurveyAccessHandler(services.AccessService),
 	}
 }
 
@@ -159,7 +167,15 @@ func main() {
 		},
 	})
 
-	app.Use(cors.New())
+	// Configure CORS to allow credentials from frontend
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     "http://localhost:3000,http://localhost:5171",
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowCredentials: true,
+		ExposeHeaders:    "Content-Length,Content-Type",
+		MaxAge:           3600,
+	}))
 
 	// Custom logger middleware to properly log request bodies
 	app.Use(func(c *fiber.Ctx) error {
@@ -277,9 +293,15 @@ func main() {
 
 	// Create API group for public routes (no authentication)
 	publicApi := app.Group("/api")
-	
+
 	// Setup email routes without authentication (for AuthService to call)
 	routes.SetupEmailRoutes(publicApi, handlers.EmailHandler)
+
+	// Public access validation (no authentication - for anonymous users)
+	publicApi.Post("/v1/surveys/public/validate-access", handlers.AccessHandler.ValidateAccess)
+
+	// Public endpoint to get survey details (for participants/anonymous users)
+	publicApi.Get("/v1/surveys/:id", handlers.SurveyHandler.GetSurvey)
 
 	// Create a new group for authenticated routes with v1 prefix
 	api := app.Group("/api/v1")
@@ -291,6 +313,13 @@ func main() {
 	routes.SetupQuestionRoutes(api, handlers.QuestionHandler)
 	routes.SetupOptionRoutes(api, handlers.OptionHandler)
 	routes.SetupAnswerRoutes(api, handlers.AnswerHandler)
+
+	// Survey sharing routes (conductor endpoints - authenticated)
+	api.Post("/surveys/:surveyId/sharing/enable", handlers.AccessHandler.EnableSharing)
+	api.Put("/surveys/:surveyId/sharing", handlers.AccessHandler.UpdateSharing)
+	api.Delete("/surveys/:surveyId/sharing", handlers.AccessHandler.DisableSharing)
+	api.Get("/surveys/:surveyId/sharing", handlers.AccessHandler.GetSharingInfo)
+	api.Get("/surveys/:surveyId/sharing/logs", handlers.AccessHandler.GetAccessLogs)
 
 	port := os.Getenv("PORT")
 	if port == "" {

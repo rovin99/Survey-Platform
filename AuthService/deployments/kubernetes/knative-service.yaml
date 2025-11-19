@@ -28,7 +28,7 @@ spec:
       containers:
       - name: auth-service
         # Your application image
-        image: rovin123/auth-service:v2
+        image: rovin123/auth-service:v1
         
         # Security context for enhanced security
         securityContext:

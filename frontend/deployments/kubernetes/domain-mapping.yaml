@@ -1,0 +1,16 @@
+apiVersion: serving.knative.dev/v1beta1
+kind: DomainMapping
+metadata:
+  name: trypanosomic-tamisha-imbricately.ngrok-free.dev
+  namespace: default
+spec:
+  ref:
+    name: frontend
+    kind: Service
+    apiVersion: serving.knative.dev/v1
+
+
+
+
+
+

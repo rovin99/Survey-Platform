@@ -78,6 +78,10 @@ func main() {
 	participantService := service.NewParticipantService(participantRepo)
 	participantHandler := handler.NewParticipantHandler(participantService)
 
+	// Initialize quiz evaluation service
+	quizEvalService := service.NewQuizEvaluationService(participantRepo)
+	participantHandler.SetQuizEvaluationService(quizEvalService)
+
 	// Setup Routes
 	// Initialize Fiber app instead of Gin
 	app := fiber.New()
@@ -100,8 +104,9 @@ func main() {
 	routes.SetupParticipantRoutes(app, participantHandler)
 
 	// Start Server
-	log.Println("Starting Participant Service on port 8081")
-	if err := app.Listen(":8081"); err != nil {
+	port := getEnvOrDefault("PORT", "8080")
+	log.Printf("Starting Participant Service on port %s", port)
+	if err := app.Listen(":" + port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

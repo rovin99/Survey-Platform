@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json" // Needed for draft content handling
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
 
 	"errors"
 
@@ -17,7 +21,7 @@ import (
 type StartResumeResponse struct {
 	Session *models.SurveySession          `json:"session"`
 	Draft   *models.ParticipantSurveyDraft `json:"draft"` // Include existing draft content
-	Survey  *MockSurvey                    `json:"survey"`
+	Survey  *SurveyDetail                  `json:"survey"`
 }
 
 // DTO for submitting final answers
@@ -32,6 +36,8 @@ type ParticipantService interface {
 	SubmitSurvey(ctx context.Context, sessionID uint, finalAnswers []FinalAnswerInput) error
 	GetSession(ctx context.Context, surveyID, participantID uint) (*models.SurveySession, error)
 	GetDraft(ctx context.Context, sessionID uint) (*models.ParticipantSurveyDraft, error)
+	GetSurveyResults(ctx context.Context, surveyID uint) (*SurveyResultsResponse, error)
+	GetSessionResponses(ctx context.Context, sessionID uint) ([]models.Answer, error)
 }
 
 type participantServiceImpl struct {
@@ -57,63 +63,153 @@ func (s *participantServiceImpl) StartOrResumeSurvey(ctx context.Context, survey
 	}
 	// If draft is nil (not found), it's fine, just return nil draft in response
 
-	// For debugging only - log and proceed
-	if draft == nil {
-		// We could log this but it's normal behavior
+	// Fetch real survey data from Survey Management Service
+	surveyServiceURL := os.Getenv("SURVEY_SERVICE_URL")
+	if surveyServiceURL == "" {
+		surveyServiceURL = "http://localhost:3002"
 	}
 
-	// Create mock survey data for development/testing
-	// In a real implementation, this would be fetched from the Survey Management Service
-	mockSurvey := &MockSurvey{
-		ID:          surveyID,
-		Title:       "Sample Survey " + fmt.Sprintf("%d", surveyID),
-		Description: "This is a sample survey for testing",
-		Questions: []MockQuestion{
-			{
-				ID:             1,
-				QuestionText:   "What is your favorite color?",
-				QuestionType:   "multiple-choice",
-				Mandatory:      true,
-				CorrectAnswers: "Red,Blue,Green,Yellow",
-			},
-			{
-				ID:           2,
-				QuestionText: "Please provide some feedback",
-				QuestionType: "text",
-				Mandatory:    false,
-			},
-			{
-				ID:           3,
-				QuestionText: "Rate your experience from 1-5",
-				QuestionType: "rating",
-				Mandatory:    true,
-			},
-		},
+	// Call the Survey Management Service to get survey details
+	url := fmt.Sprintf("%s/api/v1/surveys/%d", surveyServiceURL, surveyID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch survey from service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("survey service returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse the response (using snake_case from backend)
+	var surveyResponse struct {
+		Success bool                 `json:"success"`
+		Data    SurveyDetailFromAPI `json:"data"`
+		Message string               `json:"message"`
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if err := json.Unmarshal(body, &surveyResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse survey response: %w", err)
+	}
+
+	if !surveyResponse.Success {
+		return nil, fmt.Errorf("survey service error: %s", surveyResponse.Message)
+	}
+
+	// Convert from API format (snake_case) to frontend format (camelCase)
+	surveyDetail := convertToFrontendFormat(&surveyResponse.Data)
 
 	return &StartResumeResponse{
 		Session: session,
 		Draft:   draft,
-		Survey:  mockSurvey,
+		Survey:  surveyDetail,
 	}, nil
 }
 
-// Mock survey types for development/testing
-type MockSurvey struct {
-	ID                uint           `json:"id"`
-	Title             string         `json:"title"`
-	Description       string         `json:"description"`
-	Questions         []MockQuestion `json:"questions"`
-	IsSelfRecruitment bool           `json:"is_self_recruitment"`
-	Status            string         `json:"status"`
+// API format (snake_case from SurveyManagementService)
+type SurveyDetailFromAPI struct {
+	ID                     uint              `json:"id"`
+	Title                  string            `json:"title"`
+	Description            string            `json:"description"`
+	ConductorID            uint              `json:"conductor_id"`
+	IsSelfRecruitment      bool              `json:"is_self_recruitment"`
+	Status                 string            `json:"status"`
+	IsQuiz                 bool              `json:"is_quiz"`
+	PassingScorePercentage *int              `json:"passing_score_percentage"`
+	Questions              []QuestionFromAPI `json:"questions"`
 }
 
-type MockQuestion struct {
-	ID             uint   `json:"id"`
-	QuestionText   string `json:"question_text"`
-	QuestionType   string `json:"question_type"`
-	Mandatory      bool   `json:"mandatory"`
-	CorrectAnswers string `json:"correct_answers,omitempty"`
+type QuestionFromAPI struct {
+	ID             uint            `json:"id"`
+	SurveyID       uint            `json:"survey_id"`
+	QuestionText   string          `json:"question_text"`
+	QuestionType   string          `json:"question_type"`
+	Options        []OptionFromAPI `json:"options,omitempty"`
+	CorrectAnswers string          `json:"correct_answers"`
+	BranchingLogic string          `json:"branching_logic"`
+	Mandatory      bool            `json:"mandatory"`
+	Points         int             `json:"points"`
+	Explanation    string          `json:"explanation"`
+}
+
+type OptionFromAPI struct {
+	ID         uint   `json:"id"`
+	QuestionID uint   `json:"question_id"`
+	OptionText string `json:"option_text"`
+}
+
+// Frontend format (camelCase for JavaScript)
+type SurveyDetail struct {
+	ID                uint       `json:"id"`
+	Title             string     `json:"title"`
+	Description       string     `json:"description"`
+	ConductorID       uint       `json:"conductorId"`
+	IsSelfRecruitment bool       `json:"isSelfRecruitment"`
+	Status            string     `json:"status"`
+	Questions         []Question `json:"questions"`
+}
+
+type Question struct {
+	ID             uint     `json:"id"`
+	SurveyID       uint     `json:"surveyId"`
+	QuestionText   string   `json:"questionText"`
+	QuestionType   string   `json:"questionType"`
+	Options        []Option `json:"options,omitempty"`
+	CorrectAnswers string   `json:"correctAnswers"`
+	BranchingLogic string   `json:"branchingLogic"`
+	Mandatory      bool     `json:"mandatory"`
+}
+
+type Option struct {
+	ID         uint   `json:"id"`
+	QuestionID uint   `json:"questionId"`
+	OptionText string `json:"optionText"`
+}
+
+// Converter function
+func convertToFrontendFormat(apiSurvey *SurveyDetailFromAPI) *SurveyDetail {
+	questions := make([]Question, len(apiSurvey.Questions))
+	for i, q := range apiSurvey.Questions {
+		options := make([]Option, len(q.Options))
+		for j, opt := range q.Options {
+			options[j] = Option{
+				ID:         opt.ID,
+				QuestionID: opt.QuestionID,
+				OptionText: opt.OptionText,
+			}
+		}
+		questions[i] = Question{
+			ID:             q.ID,
+			SurveyID:       q.SurveyID,
+			QuestionText:   q.QuestionText,
+			QuestionType:   q.QuestionType,
+			Options:        options,
+			CorrectAnswers: q.CorrectAnswers,
+			BranchingLogic: q.BranchingLogic,
+			Mandatory:      q.Mandatory,
+		}
+	}
+	return &SurveyDetail{
+		ID:                apiSurvey.ID,
+		Title:             apiSurvey.Title,
+		Description:       apiSurvey.Description,
+		ConductorID:       apiSurvey.ConductorID,
+		IsSelfRecruitment: apiSurvey.IsSelfRecruitment,
+		Status:            apiSurvey.Status,
+		Questions:         questions,
+	}
 }
 
 func (s *participantServiceImpl) SaveDraft(ctx context.Context, sessionID uint, lastQuestionID *uint, draftAnswers map[string]interface{}) error {
@@ -225,4 +321,94 @@ func (s *participantServiceImpl) GetDraft(ctx context.Context, sessionID uint) (
 		return nil, repository.ErrDraftNotFound // Return specific error if needed by handler
 	}
 	return draft, nil
+}
+
+// Response structure for survey results/analytics
+type SurveyResultsResponse struct {
+	SurveyID         uint                  `json:"surveyId"`
+	TotalSessions    int                   `json:"totalSessions"`
+	CompletedSessions int                  `json:"completedSessions"`
+	InProgressSessions int                 `json:"inProgressSessions"`
+	Sessions         []SessionWithAnswers  `json:"sessions"`
+}
+
+type SessionWithAnswers struct {
+	SessionID     uint               `json:"sessionId"`
+	ParticipantID uint               `json:"participantId"`
+	Status        string             `json:"status"`
+	CreatedAt     string             `json:"createdAt"`
+	UpdatedAt     string             `json:"updatedAt"`
+	Answers       []AnswerResponse   `json:"answers"`
+}
+
+type AnswerResponse struct {
+	QuestionID   uint        `json:"questionId"`
+	ResponseData interface{} `json:"responseData"`
+	CreatedAt    string      `json:"createdAt"`
+}
+
+// GetSurveyResults retrieves all sessions and answers for a survey (for conductor analytics)
+func (s *participantServiceImpl) GetSurveyResults(ctx context.Context, surveyID uint) (*SurveyResultsResponse, error) {
+	// Get all sessions for this survey
+	allSessions, err := s.repo.GetSessionsBySurveyID(ctx, surveyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get completed sessions
+	completedSessions, err := s.repo.GetCompletedSessionsBySurveyID(ctx, surveyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build response with session details and answers
+	sessionsWithAnswers := make([]SessionWithAnswers, 0, len(completedSessions))
+	for _, session := range completedSessions {
+		// Get answers for this session
+		answers, err := s.repo.GetAnswersBySessionID(ctx, session.SessionID)
+		if err != nil {
+			continue // Skip sessions with errors
+		}
+
+		// Convert answers to response format
+		answerResponses := make([]AnswerResponse, len(answers))
+		for i, answer := range answers {
+			// Parse JSON response data
+			var responseData interface{}
+			if err := json.Unmarshal(answer.ResponseData, &responseData); err != nil {
+				responseData = string(answer.ResponseData) // Fallback to string
+			}
+
+			answerResponses[i] = AnswerResponse{
+				QuestionID:   answer.QuestionID,
+				ResponseData: responseData,
+				CreatedAt:    answer.CreatedAt.Format(time.RFC3339),
+			}
+		}
+
+		sessionsWithAnswers = append(sessionsWithAnswers, SessionWithAnswers{
+			SessionID:     session.SessionID,
+			ParticipantID: session.ParticipantID,
+			Status:        session.SessionStatus,
+			CreatedAt:     session.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:     session.UpdatedAt.Format(time.RFC3339),
+			Answers:       answerResponses,
+		})
+	}
+
+	// Calculate in-progress sessions
+	inProgressCount := len(allSessions) - len(completedSessions)
+
+	return &SurveyResultsResponse{
+		SurveyID:           surveyID,
+		TotalSessions:      len(allSessions),
+		CompletedSessions:  len(completedSessions),
+		InProgressSessions: inProgressCount,
+		Sessions:           sessionsWithAnswers,
+	}, nil
+}
+
+// GetSessionResponses retrieves all answers for a specific session
+func (s *participantServiceImpl) GetSessionResponses(ctx context.Context, sessionID uint) ([]models.Answer, error) {
+	return s.repo.GetAnswersBySessionID(ctx, sessionID)
 }

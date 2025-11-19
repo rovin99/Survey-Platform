@@ -16,12 +16,22 @@ spec:
       containers:
       - name: migrator
         # Use the migrations-specific image with EF tools
-        image: rovin123/auth-service-migrations:v2
+        image: rovin123/auth-service-migrations:v1
         
         # Override entrypoint to run migrations
-        command: ["dotnet", "ef", "database", "update"]
+        command: 
+        - /bin/sh
+        - -c
+        - |
+          dotnet ef database update --connection "$ConnectionStrings__DefaultConnection"
         
         # Load environment variables from ConfigMap and Secret
+        env:
+        - name: ConnectionStrings__DefaultConnection
+          valueFrom:
+            secretKeyRef:
+              name: auth-service-secrets
+              key: CONNECTION_STRING
         envFrom:
           - configMapRef:
               name: auth-service-config
@@ -38,11 +48,6 @@ spec:
             cpu: "500m"
             
       restartPolicy: OnFailure
-      
-      # Security context
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
         
   # Retry policy
   backoffLimit: 3

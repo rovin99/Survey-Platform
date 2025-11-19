@@ -16,7 +16,7 @@ spec:
       containers:
       - name: migrator
         # Use the migration-specific image
-        image: rovin123/survey-service-migrations:v2
+        image: rovin123/survey-service-migrations:v1
         
         # Environment variables from ConfigMap and Secret
         envFrom:
@@ -35,11 +35,6 @@ spec:
             cpu: "500m"
             
       restartPolicy: OnFailure
-      
-      # Security context
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1001
         
   # Retry policy
   backoffLimit: 3

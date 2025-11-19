@@ -19,6 +19,6 @@ public interface IAuthService
     Task<RefreshToken> GenerateRefreshTokenAsync(User user, string ipAddress);
     
     // Magic Link Authentication
-    Task<string> RequestMagicLinkAsync(string email);
+    Task<string> RequestMagicLinkAsync(string email, string? returnUrl = null);
     Task<(string AccessToken, string RefreshToken, User User)> VerifyMagicLinkAsync(string token);
 }

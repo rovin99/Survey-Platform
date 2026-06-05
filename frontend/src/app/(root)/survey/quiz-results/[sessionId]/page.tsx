@@ -6,19 +6,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, CheckCircle2, XCircle, Trophy, Clock, Target, ArrowLeft } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Trophy, Clock, Target, ArrowLeft, ClipboardList, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { participantsConfig } from "@/lib/api-config";
 
 interface QuestionResult {
   questionId: number;
   questionText: string;
+  questionType?: string;
   userAnswer: any;
   correctAnswer: any;
   isCorrect: boolean;
   pointsEarned: number;
   pointsPossible: number;
+  pendingEvaluation?: boolean;
   explanation?: string;
+  evaluatorFeedback?: string;
 }
 
 interface QuizResults {
@@ -31,6 +34,10 @@ interface QuizResults {
   totalQuestions: number;
   timeTakenSeconds: number;
   results: QuestionResult[];
+  // For manual evaluation
+  evaluationStatus?: string; // 'pending_evaluation' | 'evaluated' | 'auto_evaluated'
+  evaluatedAt?: string;
+  feedback?: string;
 }
 
 export default function QuizResultsPage() {
@@ -49,13 +56,22 @@ export default function QuizResultsPage() {
   const fetchResults = async () => {
     try {
       setLoading(true);
+
+      // Get session token for anonymous access (stored during survey taking)
+      const sessionToken = sessionStorage.getItem(`session_token_${sessionId}`);
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (sessionToken) {
+        headers["X-Session-Token"] = sessionToken;
+      }
+
       const response = await fetch(
         `${participantsConfig.baseUrl}/api/participant/sessions/${sessionId}/evaluate`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers,
           credentials: "include",
         }
       );
@@ -107,9 +123,24 @@ export default function QuizResultsPage() {
     );
   }
 
+  const hasPendingQuestions = results.results.some(r => r.pendingEvaluation);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-green-50 py-12 px-4">
       <div className="container mx-auto max-w-4xl">
+        {/* Pending evaluation banner */}
+        {hasPendingQuestions && (
+          <Card className="mb-4 border-blue-200 bg-blue-50">
+            <CardContent className="py-4 flex items-center gap-3">
+              <Clock className="h-5 w-5 text-blue-600 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-blue-900">Some questions are pending evaluation</p>
+                <p className="text-xs text-blue-700">Your auto-graded questions are shown below. Questions requiring manual grading will be updated once your instructor evaluates them.</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Header with Score */}
         <Card className="mb-6 border-2 shadow-lg">
           <CardHeader className={`${results.passed ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-gradient-to-r from-orange-500 to-red-500'} text-white`}>
@@ -180,10 +211,15 @@ export default function QuizResultsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {results.results.map((result, index) => (
-              <Card key={result.questionId} className={`border-2 ${result.isCorrect ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+              <Card key={result.questionId} className={`border-2 ${
+                result.pendingEvaluation ? 'border-blue-200 bg-blue-50' :
+                result.isCorrect ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'
+              }`}>
                 <CardContent className="pt-6">
                   <div className="flex items-start gap-3">
-                    {result.isCorrect ? (
+                    {result.pendingEvaluation ? (
+                      <Clock className="h-6 w-6 text-blue-600 flex-shrink-0 mt-1" />
+                    ) : result.isCorrect ? (
                       <CheckCircle2 className="h-6 w-6 text-green-600 flex-shrink-0 mt-1" />
                     ) : (
                       <XCircle className="h-6 w-6 text-red-600 flex-shrink-0 mt-1" />
@@ -191,33 +227,82 @@ export default function QuizResultsPage() {
                     <div className="flex-1">
                       <div className="flex items-center justify-between mb-2">
                         <h3 className="font-semibold text-lg">Question {index + 1}</h3>
-                        <Badge variant={result.isCorrect ? "default" : "destructive"}>
-                          {result.pointsEarned} / {result.pointsPossible} points
-                        </Badge>
+                        {result.pendingEvaluation ? (
+                          <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                            <Clock className="h-3 w-3 mr-1" />
+                            Pending Evaluation
+                          </Badge>
+                        ) : (
+                          <Badge variant={result.isCorrect ? "default" : "destructive"}>
+                            {result.pointsEarned} / {result.pointsPossible} points
+                          </Badge>
+                        )}
                       </div>
 
                       <p className="text-gray-900 mb-3">{result.questionText}</p>
 
+                      {result.pendingEvaluation ? (
+                        <div className="p-3 bg-white rounded border mb-3">
+                          <p className="text-xs font-medium text-gray-500 mb-1">Your Answer</p>
+                          {result.questionType === 'code' && typeof result.userAnswer === 'object' && result.userAnswer?.code ? (
+                            <div>
+                              <pre className="text-sm bg-gray-900 text-green-400 p-3 rounded overflow-x-auto">{result.userAnswer.code}</pre>
+                              <p className="text-xs text-gray-500 mt-1">Language: {result.userAnswer.language}</p>
+                              {result.userAnswer.testSummary && (
+                                <p className="text-xs text-blue-700 mt-1 font-medium">{result.userAnswer.testSummary}</p>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="font-medium text-gray-700">{String(result.userAnswer ?? '—')}</p>
+                          )}
+                          <p className="text-xs text-blue-600 mt-2">This question will be graded by your instructor.</p>
+                        </div>
+                      ) : result.questionType === 'code' && typeof result.userAnswer === 'object' && result.userAnswer?.code ? (
+                        <div className="p-3 bg-white rounded border mb-3">
+                          <p className="text-xs font-medium text-gray-500 mb-1">Your Code</p>
+                          <pre className="text-sm bg-gray-900 text-green-400 p-3 rounded overflow-x-auto max-h-48">{result.userAnswer.code}</pre>
+                          <p className="text-xs text-gray-500 mt-1">Language: {result.userAnswer.language}</p>
+                          {result.userAnswer.testSummary && (
+                            <p className={`text-xs mt-1 font-medium ${result.isCorrect ? 'text-green-700' : 'text-red-700'}`}>{result.userAnswer.testSummary}</p>
+                          )}
+                          {result.correctAnswer && (
+                            <p className="text-xs text-gray-600 mt-1">Result: {typeof result.correctAnswer === 'string' ? result.correctAnswer : JSON.stringify(result.correctAnswer)}</p>
+                          )}
+                        </div>
+                      ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                         <div className="p-3 bg-white rounded border">
                           <p className="text-xs font-medium text-gray-500 mb-1">Your Answer</p>
                           <p className={`font-medium ${result.isCorrect ? 'text-green-700' : 'text-red-700'}`}>
-                            {JSON.stringify(result.userAnswer)}
+                            {typeof result.userAnswer === 'string' ? result.userAnswer : JSON.stringify(result.userAnswer)}
                           </p>
                         </div>
 
+                        {result.correctAnswer && (
                         <div className="p-3 bg-white rounded border">
                           <p className="text-xs font-medium text-gray-500 mb-1">Correct Answer</p>
                           <p className="font-medium text-green-700">
-                            {JSON.stringify(result.correctAnswer)}
+                            {typeof result.correctAnswer === 'string' ? result.correctAnswer : JSON.stringify(result.correctAnswer)}
                           </p>
                         </div>
+                        )}
                       </div>
+                      )}
 
                       {result.explanation && (
                         <div className="p-3 bg-blue-50 rounded border border-blue-200">
                           <p className="text-xs font-medium text-blue-700 mb-1">Explanation</p>
                           <p className="text-sm text-blue-900">{result.explanation}</p>
+                        </div>
+                      )}
+
+                      {result.evaluatorFeedback && (
+                        <div className="p-3 bg-purple-50 rounded border border-purple-200 mt-3">
+                          <p className="text-xs font-medium text-purple-700 mb-1 flex items-center gap-1">
+                            <MessageSquare className="h-3 w-3" />
+                            Instructor Feedback
+                          </p>
+                          <p className="text-sm text-purple-900">{result.evaluatorFeedback}</p>
                         </div>
                       )}
                     </div>

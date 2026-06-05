@@ -42,13 +42,6 @@ export function AISurveyPrompt({ onGenerate }: Props) {
             id: `opt-${Date.now()}-${index}-${optIndex}`,
             text: opt
           })) || [],
-          branchingRules: q.branchingRules?.map(rule => ({
-            ...rule,
-            // Convert 1-indexed to actual question IDs
-            targetQuestionId: rule.targetQuestionId 
-              ? survey.questions[rule.targetQuestionId - 1]?.text 
-              : undefined
-          })) || []
         }))
       };
 
@@ -71,7 +64,6 @@ export function AISurveyPrompt({ onGenerate }: Props) {
               id: `opt-${Date.now()}-${index}-${optIndex}`,
               text: opt
             })) || [],
-            branchingRules: q.branchingRules || []
           }))
         };
         onGenerate(formattedSurvey);

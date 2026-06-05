@@ -96,11 +96,7 @@ function MagicLinkContent() {
     try {
       const response = await fetch(`${authConfig.baseUrl}/api/auth/verify-magic-link`, {
         method: 'POST',
-        headers: {
-          ...(authConfig.host && { 'Host': authConfig.host }),
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ token }),
       });

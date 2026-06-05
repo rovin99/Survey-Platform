@@ -5,6 +5,7 @@ using AuthService.Services;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 using AuthService.Utils;
+using Microsoft.AspNetCore.Antiforgery;
 namespace AuthService.Controllers
 {
     [ApiController]
@@ -13,29 +14,60 @@ namespace AuthService.Controllers
     public class ConductorController : ControllerBase
     {
         private readonly IConductorService _conductorService;
+        private readonly IAuthService _authService;
+        private readonly IUserRepository _userRepository;
+        private readonly IAntiforgery _antiforgery;
 
-        public ConductorController(IConductorService conductorService)
+        public ConductorController(
+            IConductorService conductorService,
+            IAuthService authService,
+            IUserRepository userRepository,
+            IAntiforgery antiforgery)
         {
             _conductorService = conductorService;
+            _authService = authService;
+            _userRepository = userRepository;
+            _antiforgery = antiforgery;
         }
 
         
         [HttpPost("register")]
         public async Task<IActionResult> RegisterConductor([FromBody] ConductorRegistrationRequest request)
-{
-    if (!ModelState.IsValid)
-        return BadRequest(ModelState);
-    
-    var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-    if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
-        return BadRequest("User ID not found in token");
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+            
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+                return BadRequest("User ID not found in token");
 
-    await _conductorService.RegisterConductorAsync(userId, request);
-    return StatusCode(201, ResponseUtil.Success<object>(
-        null,
-        "Conductor registration completed successfully. Verification email sent to your official email address."
-    ));
-}
+            await _conductorService.RegisterConductorAsync(userId, request);
+            
+            // After adding Conducting role, issue new tokens with updated roles
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user != null)
+            {
+                var newAccessToken = await _authService.GenerateAccessTokenAsync(user);
+                
+                // Get environment
+                var isDevelopment = HttpContext.RequestServices.GetService<IWebHostEnvironment>()!.IsDevelopment();
+                
+                // Set new access token cookie with updated roles
+                Response.Cookies.Append("accessToken", newAccessToken, new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = !isDevelopment,
+                    SameSite = SameSiteMode.Lax,
+                    Expires = DateTime.UtcNow.AddMinutes(60),
+                    Path = "/"
+                });
+            }
+            
+            return StatusCode(201, ResponseUtil.Success<object>(
+                null,
+                "Conductor registration completed successfully."
+            ));
+        }
 
         [HttpGet("~/api/Conductor/current")]
         public async Task<IActionResult> GetCurrentConductor()

@@ -12,7 +12,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
-import { apiService } from "@/services/api.service";
 import { authService } from "@/services/auth.service";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -40,54 +39,36 @@ function LoginContent() {
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated && user) {
-      handlePostLoginRedirect();
+      handlePostLoginRedirect(user);
     }
   }, [isAuthenticated, user]);
 
-  const handlePostLoginRedirect = async () => {
-    // Wait a moment for user state to update if not available yet
-    let retries = 0;
-    while (!user && retries < 10) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      retries++;
-    }
+  const handlePostLoginRedirect = (loggedInUser?: { userId: number; username: string; roles: string[] }) => {
+    const targetUser = loggedInUser || user;
 
-    if (!user) {
-      console.error('User state not available after login');
+    if (!targetUser) {
+      console.error('User state not available for redirect');
+      router.replace("/role-selection");
       return;
     }
 
-    try {
-      // Check for returnUrl query parameter
-      const returnUrl = searchParams.get('returnUrl');
-      if (returnUrl) {
-        console.log('Redirecting to returnUrl:', returnUrl);
-        router.replace(returnUrl);
-        return;
-      }
-
-      // Check if user has only "User" role (needs role selection)
-      const hasOnlyUserRole = user.roles.length === 1 && user.roles.includes("User");
-
-      if (hasOnlyUserRole) {
-        router.replace("/role-selection");
-        return;
-      }
-
-      // Check if user has other roles - if so, go to dashboard
-      if (user.roles.length > 1 || !user.roles.includes("User")) {
-        router.replace("/dashboard");
-        return;
-      }
-
-      // Fallback - redirect to role selection
-      router.replace("/role-selection");
-
-    } catch (error) {
-      console.error('Error in post-login redirect:', error);
-      // Fallback to role selection if there's an error
-      router.replace("/role-selection");
+    // Check for returnUrl query parameter
+    const returnUrl = searchParams.get('returnUrl');
+    if (returnUrl) {
+      router.replace(returnUrl);
+      return;
     }
+
+    // Check if user has only "User" role (needs role selection)
+    const hasOnlyUserRole = targetUser.roles.length === 1 && targetUser.roles.includes("User");
+
+    if (hasOnlyUserRole) {
+      router.replace("/role-selection");
+      return;
+    }
+
+    // User has other roles - go to dashboard
+    router.replace("/dashboard");
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -102,17 +83,11 @@ function LoginContent() {
     setError("");
 
     try {
-      // Call the login method from auth context
+      // Call the login method from auth context - returns user directly
       const response = await login(formData.username, formData.password);
-
-      // If login returns a CSRF token, set it in the API service
-      if (response?.csrfToken) {
-        apiService.setCSRFToken(response.csrfToken);
-      }
-
-      // Immediately trigger redirect after successful login
-      // The useEffect will also handle it, but this ensures immediate action
-      await handlePostLoginRedirect();
+      // CSRF token is automatically set via cookie by backend
+      // Use returned user directly for redirect (no race condition)
+      handlePostLoginRedirect(response?.user);
     } catch (err: any) {
       setError(err.message || "Invalid username or password");
     }
@@ -171,11 +146,11 @@ function LoginContent() {
               <form onSubmit={handleSubmit}>
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="username">Username</Label>
+                    <Label htmlFor="username">Email or Username</Label>
                     <Input
                       id="username"
                       type="text"
-                      placeholder="Enter your username"
+                      placeholder="Enter your email or username"
                       value={formData.username}
                       onChange={handleChange}
                       required

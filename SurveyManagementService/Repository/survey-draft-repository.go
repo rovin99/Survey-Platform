@@ -17,7 +17,10 @@ type SurveyDraftRepository interface {
 	Update(ctx context.Context, draft *models.SurveyDraft) (*models.SurveyDraft, error)
 	GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error)
 	ListDrafts(ctx context.Context, surveyID uint) ([]models.SurveyDraft, error)
+	ListByConductor(ctx context.Context, conductorID uint) ([]models.SurveyDraft, error)
 	DeleteAllForSurveyWithTx(ctx context.Context, tx *gorm.DB, surveyID uint) error
+	DeleteByIDWithTx(ctx context.Context, tx *gorm.DB, draftID uint) error
+	Delete(ctx context.Context, draftID uint) error
 }
 
 type surveyDraftRepository struct {
@@ -96,4 +99,24 @@ func (r *surveyDraftRepository) Update(ctx context.Context, draft *models.Survey
 // DeleteAllForSurveyWithTx deletes all drafts for a specific survey within a transaction
 func (r *surveyDraftRepository) DeleteAllForSurveyWithTx(ctx context.Context, tx *gorm.DB, surveyID uint) error {
 	return tx.WithContext(ctx).Delete(&models.SurveyDraft{}, "survey_id = ?", surveyID).Error
+}
+
+// DeleteByIDWithTx deletes a single draft by its ID within a transaction
+func (r *surveyDraftRepository) DeleteByIDWithTx(ctx context.Context, tx *gorm.DB, draftID uint) error {
+	return tx.WithContext(ctx).Delete(&models.SurveyDraft{}, draftID).Error
+}
+
+// Delete removes a single draft by its ID
+func (r *surveyDraftRepository) Delete(ctx context.Context, draftID uint) error {
+	return r.db.WithContext(ctx).Delete(&models.SurveyDraft{}, draftID).Error
+}
+
+// ListByConductor returns all drafts owned by a conductor, most recently saved first
+func (r *surveyDraftRepository) ListByConductor(ctx context.Context, conductorID uint) ([]models.SurveyDraft, error) {
+	var drafts []models.SurveyDraft
+	err := r.db.WithContext(ctx).
+		Where("conductor_id = ?", conductorID).
+		Order("last_saved DESC").
+		Find(&drafts).Error
+	return drafts, err
 }

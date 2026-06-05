@@ -34,6 +34,18 @@ namespace AuthService.Controllers
             return StatusCode(response.StatusCode, response);
         }
 
+        // Conductor-only: bulk-create student participant accounts (email + shared default password).
+        [HttpPost("bulk-onboard")]
+        [Authorize(Roles = "Conducting")]
+        public async Task<IActionResult> BulkOnboard([FromBody] BulkOnboardRequest request)
+        {
+            if (request == null)
+                return BadRequest(ResponseUtil.BadRequest<object>("Request body is required"));
+
+            var response = await _participantService.BulkOnboardAsync(request.DefaultPassword, request.Emails);
+            return StatusCode(response.StatusCode, response);
+        }
+
         [HttpGet("~/api/Participant/current")]
         public async Task<IActionResult> GetCurrentParticipant()
         {
@@ -46,6 +58,31 @@ namespace AuthService.Controllers
                 return NotFound(ResponseUtil.NotFound<object>("Participant profile not found for current user"));
 
             return Ok(participant);
+        }
+
+        [HttpGet("profile")]
+        public async Task<IActionResult> GetProfile()
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+                return BadRequest(ResponseUtil.BadRequest<object>("User ID not found in token"));
+
+            var response = await _participantService.GetProfileByUserIdAsync(userId);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPut("profile")]
+        public async Task<IActionResult> UpdateProfile([FromBody] ParticipantProfileUpdateRequest request)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+                return BadRequest(ResponseUtil.BadRequest<object>("User ID not found in token"));
+
+            var response = await _participantService.UpdateProfileAsync(userId, request);
+            return StatusCode(response.StatusCode, response);
         }
 
         [HttpGet("{id:int}")]

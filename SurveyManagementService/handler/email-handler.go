@@ -1,8 +1,10 @@
 package handler
 
 import (
+    "os"
+
     "github.com/gofiber/fiber/v2"
-    
+
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/Utils/response"
 	
    
@@ -15,6 +17,7 @@ type EmailHandler struct {
 type EmailServiceInterface interface {
     SendVerificationEmail(email, code string) error
     SendMagicLinkEmail(email, magicLink, username string) error
+    SendGenericEmail(to, subject, body string) error
     CheckHealth() error
 }
 
@@ -70,6 +73,35 @@ func (h *EmailHandler) SendMagicLinkEmail(c *fiber.Ctx) error {
     }
 
     return response.Success(c, nil, "Magic link email sent successfully")
+}
+
+// SendGenericEmail handles sending a generic email (used by other services for notifications)
+// Requires X-Internal-API-Key header to prevent public abuse
+func (h *EmailHandler) SendGenericEmail(c *fiber.Ctx) error {
+    // Verify internal API key
+    apiKey := c.Get("X-Internal-API-Key")
+    expectedKey := os.Getenv("INTERNAL_API_KEY")
+    if expectedKey != "" && apiKey != expectedKey {
+        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+            "success": false,
+            "error":   "Unauthorized: valid internal API key required",
+        })
+    }
+
+    var req struct {
+        To      string `json:"to"`
+        Subject string `json:"subject"`
+        Body    string `json:"body"`
+    }
+    if err := c.BodyParser(&req); err != nil || req.To == "" || req.Subject == "" {
+        return response.BadRequest(c, "Invalid request: to, subject, body required")
+    }
+
+    if err := h.emailService.SendGenericEmail(req.To, req.Subject, req.Body); err != nil {
+        return response.InternalServerError(c, "Failed to send email")
+    }
+
+    return response.Success(c, nil, "Email sent successfully")
 }
 
 // CheckEmailHealth checks if email service is working

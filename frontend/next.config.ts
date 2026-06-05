@@ -12,19 +12,9 @@ const getApiUrls = () => {
 		'http://localhost:3001',
 		'http://localhost:8080',
 		'ws://localhost:3001',
-		// Cluster URLs (nip.io)
-		'http://*.127.0.0.1.nip.io:8080',  // Allow all .nip.io services
-		'ws://*.127.0.0.1.nip.io:8080',    // WebSocket support
-		'http://frontend.default.127.0.0.1.nip.io:8080',
-		'http://auth-service.default.127.0.0.1.nip.io:8080',
-		'http://survey-management-service.default.127.0.0.1.nip.io:8080',
-		'http://participants-management-service.default.127.0.0.1.nip.io:8080',
-		// ngrok public URL (HTTPS)
-		'https://trypanosomic-tamisha-imbricately.ngrok-free.dev',
-		'https://*.ngrok-free.dev',  // Allow all ngrok subdomains
 	];
 	
-	// Add environment-based API URLs
+	// Add environment-based API URLs (configured per deployment)
 	if (process.env.NEXT_PUBLIC_API_BASE_URL) {
 		urls.push(process.env.NEXT_PUBLIC_API_BASE_URL);
 	}
@@ -36,6 +26,10 @@ const getApiUrls = () => {
 	}
 	if (process.env.NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL) {
 		urls.push(process.env.NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL);
+	}
+	// Additional origins from environment (comma-separated)
+	if (process.env.NEXT_PUBLIC_CSP_CONNECT_SRC) {
+		urls.push(...process.env.NEXT_PUBLIC_CSP_CONNECT_SRC.split(',').map(u => u.trim()));
 	}
 	
 	// Remove duplicates
@@ -59,7 +53,7 @@ const nextConfig: NextConfig = {
 				// Apply these headers to all routes
 				source: "/:path*",
 				headers: [
-					{ key: "Access-Control-Allow-Credentials", value: "true" },
+					// Note: CORS headers (Access-Control-*) are set by the backend, not here
 					{
 						key: "X-Frame-Options",
 						value: "DENY",
@@ -82,7 +76,7 @@ const nextConfig: NextConfig = {
 					},
 					{
 						key: "Content-Security-Policy",
-						value: `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src ${connectSrc}; frame-ancestors 'none'; base-uri 'self'; form-action 'self';`,
+						value: `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src ${connectSrc}; frame-ancestors 'none'; base-uri 'self'; form-action 'self';`,
 					},
 					{
 						key: "Strict-Transport-Security",

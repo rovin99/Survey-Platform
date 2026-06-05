@@ -1,13 +1,13 @@
 package handler
 
 import (
+	"log"
 	"mime/multipart"
 	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/Utils/response"
 )
 
 type MediaHandler struct {
@@ -25,58 +25,48 @@ func NewMediaHandler(mediaService MediaServiceInterface) *MediaHandler {
 	}
 }
 
-// getFileType determines the file type based on content type
-func getFileType(contentType string) string {
-	switch {
-	case contentType == "image/jpeg" || contentType == "image/png" || contentType == "image/gif":
-		return "IMAGE"
-	case contentType == "video/mp4" || contentType == "video/mpeg" || contentType == "video/quicktime":
-		return "VIDEO"
-	case contentType == "audio/mpeg" || contentType == "audio/wav" || contentType == "audio/ogg":
-		return "AUDIO"
-	default:
-		return "DOCUMENT"
-	}
-}
-
-// handler/media_handler.go
 func (h *MediaHandler) UploadMedia(c *fiber.Ctx) error {
-	// Get file from request
 	file, err := c.FormFile("file")
 	if err != nil {
-		return response.BadRequest(c, "Invalid file")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "No file provided",
+		})
 	}
 
-	// Get draft ID if available
-	draftID := c.FormValue("draftId")
+	log.Printf("[INFO] Media upload: filename=%s size=%d type=%s", file.Filename, file.Size, file.Header.Get("Content-Type"))
 
-	// Upload to S3
 	fileURL, err := h.mediaService.UploadMedia(file)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to upload file")
+		log.Printf("[ERROR] Media upload failed: %v", err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
 	}
 
-	// Create media record
 	media := &models.SurveyMediaFile{
 		FileURL:   fileURL,
-		FileType:  getFileType(file.Header.Get("Content-Type")),
+		FileType:  "IMAGE",
 		CreatedAt: time.Now(),
 	}
 
+	draftID := c.FormValue("draftId")
 	if draftID != "" {
-		// Parse draft ID if needed
-		draftIDUint, err := strconv.ParseUint(draftID, 10, 32)
-		if err == nil {
-			// Associate with draft
+		if draftIDUint, err := strconv.ParseUint(draftID, 10, 32); err == nil {
 			media.SurveyID = uint(draftIDUint)
 		}
 	}
 
-	// Save media record
 	if err := h.mediaService.SaveMedia(media); err != nil {
-		return response.InternalServerError(c, "Failed to save media record")
+		log.Printf("[ERROR] Failed to save media record: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to save media record",
+		})
 	}
 
+	log.Printf("[SUCCESS] Media uploaded: id=%d url=%s", media.MediaID, media.FileURL)
 	return c.JSON(fiber.Map{
 		"success":  true,
 		"mediaId":  media.MediaID,

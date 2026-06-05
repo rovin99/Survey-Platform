@@ -19,6 +19,8 @@ type QuestionService interface {
 	DeleteQuestion(ctx context.Context, id uint) error
 	ValidateQuestionType(questionType string) bool
 	CreateQuestionWithOptions(ctx context.Context, question *models.Question, options []models.Option) error
+	// GetSurveyConductorID returns the conductor ID for a survey (for ownership verification)
+	GetSurveyConductorID(ctx context.Context, surveyID uint) (uint, error)
 }
 
 type questionService struct {
@@ -143,4 +145,18 @@ func (s *questionService) CreateQuestionWithOptions(ctx context.Context, questio
 
 		return nil
 	})
+}
+
+// GetSurveyConductorID returns the conductor ID for a survey (for ownership verification)
+func (s *questionService) GetSurveyConductorID(ctx context.Context, surveyID uint) (uint, error) {
+	if surveyID == 0 {
+		return 0, errors.New("invalid survey ID")
+	}
+
+	survey, err := s.surveyRepo.GetByID(ctx, surveyID)
+	if err != nil {
+		return 0, err
+	}
+
+	return survey.ConductorID, nil
 }

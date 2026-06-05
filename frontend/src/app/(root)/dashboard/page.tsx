@@ -90,7 +90,16 @@ export default function DashboardPage() {
 		<>
 			<RoleToggle />
 			{activeRole === "conductor" && hasConductingRole && (
-				<ConductorDashboard showParticipantButton={!hasParticipatingRole} />
+				<ConductorDashboard
+					showParticipantButton={!hasParticipatingRole}
+					onSwitchToParticipant={() => {
+						if (hasParticipatingRole) {
+							setActiveRole("participant");
+						} else {
+							router.push("/role-selection");
+						}
+					}}
+				/>
 			)}
 			{activeRole === "participant" && hasParticipatingRole && (
 				<ParticipantDashboard showConductorButton={!hasConductingRole} />

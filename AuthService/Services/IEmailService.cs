@@ -9,7 +9,6 @@ namespace AuthService.Services
 {
     public interface IEmailService
     {
-        Task SendVerificationEmailAsync(string email);
         Task SendMagicLinkAsync(string email, string magicLink, string? username = null);
         Task<bool> IsEmailServiceConfiguredAsync();
     }
@@ -36,51 +35,6 @@ namespace AuthService.Services
             _logger = logger;
             
             _httpClient.Timeout = TimeSpan.FromSeconds(_settings.TimeoutSeconds);
-        }
-
-        public async Task SendVerificationEmailAsync(string email)
-        {
-            try
-            {
-                // Generate a 6-digit verification code
-                var verificationCode = GenerateVerificationCode();
-
-                var request = new
-                {
-                    email = email,
-                    code = verificationCode
-                };
-
-                var content = new StringContent(
-                    JsonSerializer.Serialize(request),
-                    Encoding.UTF8,
-                    "application/json"
-                );
-
-                var requestUrl = $"{_settings.BaseUrl}/email/verify";
-                var response = await _httpClient.PostAsync(requestUrl, content);
-                
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogError("Failed to send verification email. Status: {StatusCode}, Error: {Error}", 
-                        response.StatusCode, errorContent);
-                    
-                    throw new Exception($"Failed to send verification email: {response.StatusCode}");
-                }
-
-                _logger.LogInformation("Successfully sent verification email to {Email}", email);
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogError(ex, "HTTP request failed while sending verification email to {Email}", email);
-                throw new Exception("Failed to connect to email service", ex);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unexpected error while sending verification email to {Email}", email);
-                throw;
-            }
         }
 
         public async Task SendMagicLinkAsync(string email, string magicLink, string? username = null)
@@ -143,12 +97,6 @@ namespace AuthService.Services
             {
                 return false;
             }
-        }
-
-        private string GenerateVerificationCode()
-        {
-            Random random = new Random();
-            return random.Next(100000, 999999).ToString();
         }
     }
     

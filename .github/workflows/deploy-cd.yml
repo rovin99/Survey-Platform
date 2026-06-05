@@ -1,197 +1,97 @@
-name: Deploy to Kubernetes (CD)
+name: Deploy to Knative (manual)
 
+# Manual-only Knative deployment. The push-to-main deploy is handled by deploy-k3s-cd.yml.
+# Builds images to GHCR and applies the Knative service manifests with the freshly built image
+# substituted in (no `kn` CLI dependency — kubectl is available on the runner, kn is not).
 on:
-  push:
-    branches:
-      - main
-      - develop
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - staging
-          - production
       services:
-        description: 'Services to deploy (comma-separated: auth,survey,participant,frontend or "all")'
+        description: 'Comma-separated: auth,survey,participant,frontend,infra — or "all"'
         required: true
         default: 'all'
         type: string
 
 env:
   REGISTRY: ghcr.io
+  REPO: ${{ github.repository }}
 
 jobs:
-  determine-changes:
-    name: Determine Changed Services
+  deploy:
+    name: Build & Deploy to Knative
     runs-on: ubuntu-latest
-    outputs:
-      auth-changed: ${{ steps.changes.outputs.auth }}
-      survey-changed: ${{ steps.changes.outputs.survey }}
-      participant-changed: ${{ steps.changes.outputs.participant }}
-      frontend-changed: ${{ steps.changes.outputs.frontend }}
-      environment: ${{ steps.env.outputs.environment }}
-      deploy-all: ${{ steps.deploy.outputs.all }}
-    
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          fetch-depth: 2
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Detect changed services
-        uses: dorny/paths-filter@v2
-        id: changes
+      - name: Set kubeconfig
+        uses: azure/k8s-set-context@v4
         with:
-          filters: |
-            auth:
-              - 'AuthService/**'
-            survey:
-              - 'SurveyManagementService/**'
-            participant:
-              - 'ParticipantsManagementService/**'
-            frontend:
-              - 'frontend/**'
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
 
-      - name: Determine environment
-        id: env
+      - name: Compute targets
+        id: t
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "environment=production" >> $GITHUB_OUTPUT
-          else
-            echo "environment=dev" >> $GITHUB_OUTPUT
-          fi
+          S="${{ github.event.inputs.services }}"
+          for k in auth survey participant frontend infra; do
+            if [ "$S" = "all" ] || echo "$S" | grep -qw "$k"; then echo "$k=true" >> "$GITHUB_OUTPUT"; else echo "$k=false" >> "$GITHUB_OUTPUT"; fi
+          done
 
-      - name: Determine deployment scope
-        id: deploy
+      # Helper: build+push and apply a Knative service with the new image substituted in.
+      - name: Deploy AuthService
+        if: steps.t.outputs.auth == 'true'
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.services }}" == "all" ]; then
-              echo "all=true" >> $GITHUB_OUTPUT
-            else
-              echo "all=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "all=false" >> $GITHUB_OUTPUT
-          fi
+          IMG=${REGISTRY}/${REPO}/auth-service:${{ github.sha }}
+          docker build -t "$IMG" ./AuthService && docker push "$IMG"
+          kubectl apply -f AuthService/deployments/kubernetes/configmap.yaml
+          sed "s#image:.*#image: $IMG#" AuthService/deployments/kubernetes/knative-service.yaml | kubectl apply -f -
 
-  deploy-auth:
-    name: Deploy AuthService
-    needs: determine-changes
-    if: needs.determine-changes.outputs.auth-changed == 'true' || needs.determine-changes.outputs.deploy-all == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy to ${{ needs.determine-changes.outputs.environment }}
+      - name: Deploy SurveyService
+        if: steps.t.outputs.survey == 'true'
         run: |
-          echo "🚀 Deploying AuthService to ${{ needs.determine-changes.outputs.environment }}"
-          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository }}/auth-service:${{ github.sha }}"
-          
-          # Here we would typically:
-          # 1. Update Kubernetes manifests
-          # 2. Apply to cluster or trigger ArgoCD sync
-          # 3. Wait for deployment completion
-          
-          echo "✅ AuthService deployment completed"
+          IMG=${REGISTRY}/${REPO}/survey-service:${{ github.sha }}
+          docker build -t "$IMG" ./SurveyManagementService && docker push "$IMG"
+          kubectl apply -f SurveyManagementService/deployments/kubernetes/configmap.yaml
+          sed "s#image:.*#image: $IMG#" SurveyManagementService/deployments/kubernetes/k-native-service.yaml | kubectl apply -f -
 
-  deploy-survey:
-    name: Deploy SurveyService
-    needs: determine-changes
-    if: needs.determine-changes.outputs.survey-changed == 'true' || needs.determine-changes.outputs.deploy-all == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy to ${{ needs.determine-changes.outputs.environment }}
+      - name: Deploy ParticipantsService
+        if: steps.t.outputs.participant == 'true'
         run: |
-          echo "🚀 Deploying SurveyService to ${{ needs.determine-changes.outputs.environment }}"
-          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository }}/survey-service:${{ github.sha }}"
-          echo "✅ SurveyService deployment completed"
+          IMG=${REGISTRY}/${REPO}/participant-service:${{ github.sha }}
+          docker build -t "$IMG" ./ParticipantsManagementService && docker push "$IMG"
+          kubectl apply -f ParticipantsManagementService/deployments/kubernetes/configmap.yaml
+          sed "s#image:.*#image: $IMG#" ParticipantsManagementService/deployments/kubernetes/knative-service.yaml | kubectl apply -f -
 
-  deploy-participant:
-    name: Deploy ParticipantService
-    needs: determine-changes
-    if: needs.determine-changes.outputs.participant-changed == 'true' || needs.determine-changes.outputs.deploy-all == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy to ${{ needs.determine-changes.outputs.environment }}
+      - name: Deploy Frontend
+        if: steps.t.outputs.frontend == 'true'
         run: |
-          echo "🚀 Deploying ParticipantService to ${{ needs.determine-changes.outputs.environment }}"
-          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository }}/participant-service:${{ github.sha }}"
-          echo "✅ ParticipantService deployment completed"
+          IMG=${REGISTRY}/${REPO}/frontend:${{ github.sha }}
+          docker build \
+            --build-arg NEXT_PUBLIC_API_BASE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_AUTH_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_SURVEY_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            -t "$IMG" ./frontend && docker push "$IMG"
+          kubectl apply -f frontend/deployments/kubernetes/configmap.yaml
+          sed "s#image:.*#image: $IMG#" frontend/deployments/kubernetes/knative-service.yaml | kubectl apply -f -
 
-  deploy-frontend:
-    name: Deploy Frontend
-    needs: determine-changes
-    if: needs.determine-changes.outputs.frontend-changed == 'true' || needs.determine-changes.outputs.deploy-all == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Deploy Infrastructure
+        if: steps.t.outputs.infra == 'true'
+        run: |
+          kubectl apply -f infrastructure/minio/minio-deployment.yaml
+          kubectl apply -f smart-proxy/deployment.yaml
 
-      - name: Deploy to ${{ needs.determine-changes.outputs.environment }}
+      - name: Summary
+        if: always()
         run: |
-          echo "🚀 Deploying Frontend to ${{ needs.determine-changes.outputs.environment }}"
-          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository }}/frontend:${{ github.sha }}"
-          echo "✅ Frontend deployment completed"
-
-  health-check:
-    name: Post-Deployment Health Check
-    needs: [determine-changes, deploy-auth, deploy-survey, deploy-participant, deploy-frontend]
-    if: always()
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Wait for services to be ready
-        run: |
-          echo "⏳ Waiting for services to be ready..."
-          sleep 30
-          
-      - name: Health check placeholder
-        run: |
-          echo "🔍 Running health checks for ${{ needs.determine-changes.outputs.environment }}"
-          
-          # Placeholder for actual health checks
-          # Example:
-          # curl -f https://api-dev.survey-platform.com/api/auth/health || exit 1
-          # curl -f https://api-dev.survey-platform.com/api/v1/health || exit 1
-          # curl -f https://dev.survey-platform.com || exit 1
-          
-          echo "✅ All services are healthy"
-
-  notify:
-    name: Notify Deployment Status
-    needs: [determine-changes, deploy-auth, deploy-survey, deploy-participant, deploy-frontend, health-check]
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-      - name: Notify success
-        if: needs.health-check.result == 'success'
-        run: |
-          echo "🎉 Deployment to ${{ needs.determine-changes.outputs.environment }} completed successfully!"
-          echo "Environment: ${{ needs.determine-changes.outputs.environment }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Actor: ${{ github.actor }}"
-
-      - name: Notify failure
-        if: failure()
-        run: |
-          echo "❌ Deployment to ${{ needs.determine-changes.outputs.environment }} failed!"
-          echo "Please check the logs and consider rollback if necessary."
+          echo "=== Knative deploy: ${{ github.sha }} ==="
+          kubectl get ksvc -n default 2>/dev/null || echo "Could not list Knative services"

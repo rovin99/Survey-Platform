@@ -3,6 +3,8 @@ package models
 import (
 	"context"
 	"time"
+
+	"gorm.io/datatypes"
 )
 
 type Survey struct {
@@ -14,12 +16,22 @@ type Survey struct {
 	Status            string              `json:"status"`
 	IsShareable       bool                `json:"is_shareable" gorm:"default:false"`
 	ShareEnabledAt    *time.Time          `json:"share_enabled_at,omitempty"`
+	// Distribution settings
+	AllowAnonymous    bool                `json:"allow_anonymous" gorm:"default:false"` // If true, participants don't need to register
+	// Display mode: how questions are presented to participants ("one_by_one" or "all_at_once")
+	QuestionDisplayMode string            `json:"question_display_mode" gorm:"default:'one_by_one'"`
 	// Quiz-specific fields
-	IsQuiz                  bool   `json:"is_quiz" gorm:"default:false"`
-	TimeLimitMinutes        *int   `json:"time_limit_minutes,omitempty"`
-	PassingScorePercentage  *int   `json:"passing_score_percentage,omitempty"`
-	ShowCorrectAnswers      bool   `json:"show_correct_answers" gorm:"default:true"`
-	ShuffleQuestions        bool   `json:"shuffle_questions" gorm:"default:false"`
+	IsQuiz                    bool   `json:"is_quiz" gorm:"default:false"`
+	TimeLimitMinutes          *int   `json:"time_limit_minutes,omitempty"`
+	PassingScorePercentage    *int   `json:"passing_score_percentage,omitempty"`
+	ShowCorrectAnswers        bool   `json:"show_correct_answers" gorm:"default:true"`
+	ShuffleQuestions          bool   `json:"shuffle_questions" gorm:"default:false"`
+	ShuffleOptions            bool   `json:"shuffle_options" gorm:"default:false"`
+	MaxAttempts               *int   `json:"max_attempts,omitempty"` // Max times a participant can take this survey (null = unlimited)
+	RequiresManualEvaluation  bool   `json:"requires_manual_evaluation" gorm:"default:false"` // If true, conductor must manually grade submissions
+	// Custom participant fields - JSON array of field definitions
+	// Example: [{"id":"name","label":"Full Name","type":"text","required":true},{"id":"roll_no","label":"Roll Number","type":"text","required":false}]
+	ParticipantFields       datatypes.JSON `json:"participant_fields,omitempty" gorm:"type:jsonb"`
 	Questions         []Question          `json:"questions,omitempty" gorm:"foreignKey:SurveyID"`
 	Requirements      []SurveyRequirement `json:"requirements,omitempty" gorm:"foreignKey:SurveyID"`
 	CreatedAt         time.Time           `json:"created_at"`
@@ -27,18 +39,22 @@ type Survey struct {
 }
 
 type Question struct {
-	QuestionID     uint      `json:"id" gorm:"primaryKey"`
-	SurveyID       uint      `json:"survey_id"`
-	QuestionText   string    `json:"question_text"`
-	QuestionType   string    `json:"question_type"`   // Enum: Text, MultipleChoice, etc.
-	Options        []Option  `json:"options,omitempty" gorm:"foreignKey:QuestionID"` // For multiple-choice questions
-	CorrectAnswers string    `json:"correct_answers"` // Comma-separated IDs or JSON string for multiple correct answers
-	BranchingLogic string    `json:"branching_logic"` // JSON string or nullable field
-	Mandatory      bool      `json:"mandatory"`
-	Points         int       `json:"points" gorm:"default:1"` // Quiz: points for this question
-	Explanation    string    `json:"explanation"` // Quiz: explanation for correct answer
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	QuestionID     uint              `json:"id" gorm:"primaryKey"`
+	SurveyID       uint              `json:"survey_id"`
+	QuestionText   string            `json:"question_text"`
+	QuestionType   string            `json:"question_type"`
+	Options        []Option          `json:"options,omitempty" gorm:"foreignKey:QuestionID"`
+	MediaFiles     []SurveyMediaFile `json:"media_files,omitempty" gorm:"foreignKey:QuestionID;references:QuestionID;constraint:false"`
+	CorrectAnswers string            `json:"correct_answers"`
+	BranchingLogic string            `json:"branching_logic"`
+	Mandatory      bool              `json:"mandatory"`
+	Points         int               `json:"points" gorm:"default:1"`
+	Explanation    string            `json:"explanation"`
+	// Participant-authored justification ("reason") for choice questions (anti-cheating).
+	RequiresJustification bool       `json:"requires_justification" gorm:"default:false"`
+	JustificationRequired bool       `json:"justification_required" gorm:"default:false"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
 }
 
 

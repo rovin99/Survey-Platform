@@ -14,6 +14,7 @@ func MigrateSurveyTables(db *gorm.DB) error {
 		&models.Answer{},
 		&models.ParticipantSurveyDraft{},
 		&models.SurveyMediaFile{},
+		&models.QuestionEvaluation{},
 	)
 	if err != nil {
 		log.Printf("Failed to migrate survey-related tables: %v", err)

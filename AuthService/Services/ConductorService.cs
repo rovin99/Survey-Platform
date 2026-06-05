@@ -9,17 +9,14 @@ namespace AuthService.Services
     public class ConductorService : IConductorService
     {
         private readonly IConductorRepository _conductorRepository;
-        private readonly IEmailService _emailService;
         private readonly IAuthService _authService;
-        
+
         public ConductorService(
             IConductorRepository conductorRepository,
-            IEmailService emailService,
             IAuthService authService
         )
         {
             _conductorRepository = conductorRepository;
-            _emailService = emailService;
             _authService = authService;
         }
 
@@ -37,27 +34,10 @@ namespace AuthService.Services
                 existingConductor.Address = request.Address;
                 existingConductor.UpdatedAt = DateTime.UtcNow;
 
-                try
-                {
-                    await _conductorRepository.UpdateAsync(existingConductor);
-                    
-                    // Ensure user has Conducting role (in case it was missing)
-                    await _authService.AddUserRoleAsync(userId, "Conducting");
-                    
-                    // Try to send verification email, but don't fail if email service is unavailable
-                    try
-                    {
-                        await _emailService.SendVerificationEmailAsync(existingConductor.ContactEmail);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Warning: Failed to send verification email to {existingConductor.ContactEmail}: {ex.Message}");
-                    }
-                }
-                catch (Exception)
-                {
-                    throw;
-                }
+                await _conductorRepository.UpdateAsync(existingConductor);
+
+                // Ensure user has Conducting role (in case it was missing)
+                await _authService.AddUserRoleAsync(userId, "Conducting");
                 return;
             }
             
@@ -75,30 +55,10 @@ namespace AuthService.Services
                 UpdatedAt = DateTime.UtcNow
             };
 
-            try
-            {
-                await _conductorRepository.AddAsync(conductor);
-                
-                // Add Conducting role to the user
-                await _authService.AddUserRoleAsync(userId, "Conducting");
-                
-                // Try to send verification email, but don't fail if email service is unavailable
-                try
-                {
-                    await _emailService.SendVerificationEmailAsync(conductor.ContactEmail);
-                }
-                catch (Exception ex)
-                {
-                    // Log the error but don't fail the registration
-                    // In production, you might want to queue this for retry
-                    Console.WriteLine($"Warning: Failed to send verification email to {conductor.ContactEmail}: {ex.Message}");
-                }
-            }
-            catch (Exception)
-            {
-                // If conductor creation fails, let the exception bubble up
-                throw;
-            }
+            await _conductorRepository.AddAsync(conductor);
+
+            // Add Conducting role to the user
+            await _authService.AddUserRoleAsync(userId, "Conducting");
         }
 
         public async Task<Conductor> GetByIdAsync(int id)

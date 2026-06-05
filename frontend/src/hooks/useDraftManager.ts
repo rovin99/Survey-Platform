@@ -77,7 +77,6 @@ export function useDraftManager(conductorId: number) {
         question_text: q.question_text,
         question_type: q.question_type,
         mandatory: q.mandatory,
-        branching_logic: q.branching_logic,
         correct_answers: q.correct_answers || ""
       })),
       options: draftData.draftContent.options.map(opt => ({

@@ -5,313 +5,541 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, FileText, BarChart3, Clock, LogOut, TrendingUp, Users, Share2 } from "lucide-react";
-import { authConfig } from "@/lib/api-config";
+import { Plus, FileText, BarChart3, Clock, LogOut, TrendingUp, Users, Share2, Send, Eye, Edit, ClipboardCheck, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { surveyConfig, participantsConfig } from "@/lib/api-config";
+import { toast } from "sonner";
 
 interface Survey {
-	id: number;
-	title: string;
-	description: string;
-	status: string;
-	created_at: string;
-	responseCount?: number;
+  id: number;
+  title: string;
+  description: string;
+  status: string;
+  created_at: string;
+  responseCount?: number;
+  requires_manual_evaluation?: boolean;
+  is_quiz?: boolean;
+  pendingEvaluations?: number;
+}
+
+interface Draft {
+  draftId: number;
+  surveyId: number;
+  title: string;
+  questionCount: number;
+  lastSaved: string;
+  updatedAt: string;
 }
 
 interface ConductorDashboardProps {
-	showParticipantButton?: boolean;
+  showParticipantButton?: boolean;
+  onSwitchToParticipant?: () => void;
 }
 
-export default function ConductorDashboard({ showParticipantButton = false }: ConductorDashboardProps) {
-	const { user, logout } = useAuth();
-	const router = useRouter();
-	const [surveys, setSurveys] = useState<Survey[]>([]);
-	const [stats, setStats] = useState({
-		total: 0,
-		draft: 0,
-		published: 0,
-		responses: 0
-	});
-	const [loading, setLoading] = useState(true);
+export default function ConductorDashboard({ showParticipantButton = false, onSwitchToParticipant }: ConductorDashboardProps) {
+  const { user, logout } = useAuth();
+  const router = useRouter();
+  const [surveys, setSurveys] = useState<Survey[]>([]);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [draftDeleteTarget, setDraftDeleteTarget] = useState<Draft | null>(null);
+  const [stats, setStats] = useState({
+    total: 0,
+    draft: 0,
+    published: 0,
+    responses: 0
+  });
+  const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<Survey | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-	useEffect(() => {
-		fetchSurveys();
-	}, []);
+  useEffect(() => {
+    fetchSurveys();
+  }, []);
 
-	const fetchSurveys = async () => {
-		try {
-			setLoading(true);
-			// Get conductor ID from user data
-			const conductorResponse = await fetch(`${authConfig.baseUrl}/api/Conductor/current`, {
-				credentials: 'include',
-				headers: {
-          ...(authConfig.host && { 'Host': authConfig.host }),
-					'Content-Type': 'application/json'
-				}
-			});
+  const fetchSurveys = async () => {
+    try {
+      setLoading(true);
+      // SECURITY: Use /surveys/my endpoint which scopes to authenticated conductor via JWT
+      // No need to fetch conductor ID separately - the backend extracts it from JWT
+      const response = await fetch(`${surveyConfig.baseUrl}/api/v1/surveys/my`, {
+        credentials: 'include',
+      });
 
-			if (!conductorResponse.ok) {
-				console.error('Failed to fetch conductor:', conductorResponse.status);
-				throw new Error('Failed to fetch conductor');
-			}
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to fetch surveys' }));
+        console.error('Failed to fetch surveys:', response.status, errorData);
+        toast.error(`Failed to load surveys: ${errorData.message || errorData.error?.message || 'Unknown error'}`);
+        return;
+      }
 
-			const conductorData = await conductorResponse.json();
-			console.log('Conductor response:', conductorData);
-			
-			// Handle different response structures
-			const conductorId = conductorData.data?.conductorId || conductorData.conductorId;
-			
-			if (!conductorId) {
-				console.error('No conductor ID found in response:', conductorData);
-				throw new Error('Conductor not registered');
-			}
+      const data = await response.json();
+      const surveyList = data.data || [];
+      
+      console.log('Fetched surveys:', surveyList.length, surveyList);
 
-		console.log('Fetching surveys for conductor ID:', conductorId);
+      // Fetch response counts and pending evaluations for each survey
+      const surveysWithCounts = await Promise.all(
+        surveyList.map(async (survey: Survey) => {
+          const surveyWithStats = { ...survey, responseCount: 0, pendingEvaluations: 0 };
 
-		// Fetch surveys by conductor via AuthService proxy
-		// Auth is handled automatically via HTTP-only cookies
-		const response = await fetch(`${authConfig.baseUrl}/api/SurveyProxy/surveys/conductor/${conductorId}`, {
-			credentials: 'include',
-			headers: {
-        ...(authConfig.host && { 'Host': authConfig.host }),
-				'Content-Type': 'application/json'
-			}
-		});
+          try {
+            // Fetch response count
+            const analyticsResponse = await fetch(
+              `${participantsConfig.baseUrl}/api/participant/surveys/${survey.id}/results`,
+              { credentials: 'include' }
+            );
 
-			if (response.ok) {
-				const data = await response.json();
-				console.log('Surveys response:', data);
-				const surveyList = data.data || [];
+            if (analyticsResponse.ok) {
+              const analyticsData = await analyticsResponse.json();
+              surveyWithStats.responseCount = analyticsData.data?.responses?.length || 0;
+            }
+          } catch (err) {
+            console.error(`Failed to fetch analytics for survey ${survey.id}:`, err);
+          }
 
-				// Fetch response counts for each survey
-				const surveysWithCounts = await Promise.all(
-					surveyList.map(async (survey: Survey) => {
-						try {
-							// Fetch analytics for each survey
-							const analyticsResponse = await fetch(`http://localhost:8080/api/participant/surveys/${survey.id}/results`, {
-								credentials: 'include',
-								headers: {
-									'Host': 'localhost:8080',
-									'Content-Type': 'application/json'
-								}
-							});
+          // Fetch pending evaluations count if survey requires manual evaluation
+          if (survey.requires_manual_evaluation && survey.status === 'PUBLISHED') {
+            try {
+              const evalResponse = await fetch(
+                `${participantsConfig.baseUrl}/api/participant/surveys/${survey.id}/pending-evaluations`,
+                { credentials: 'include' }
+              );
 
-							if (analyticsResponse.ok) {
-								const analyticsData = await analyticsResponse.json();
-								return {
-									...survey,
-									responseCount: analyticsData.data?.completedSessions || 0
-								};
-							}
-						} catch (error) {
-							console.error(`Error fetching analytics for survey ${survey.id}:`, error);
-						}
-						return { ...survey, responseCount: 0 };
-					})
-				);
+              if (evalResponse.ok) {
+                const evalData = await evalResponse.json();
+                surveyWithStats.pendingEvaluations = evalData.pending_count || 0;
+              }
+            } catch (err) {
+              console.error(`Failed to fetch pending evaluations for survey ${survey.id}:`, err);
+            }
+          }
 
-				setSurveys(surveysWithCounts);
+          return surveyWithStats;
+        })
+      );
 
-				// Calculate stats
-				const total = surveysWithCounts.length;
-				const published = surveysWithCounts.filter((s: Survey) => s.status === 'PUBLISHED').length;
-				const draft = total - published;
-				const totalResponses = surveysWithCounts.reduce((sum: number, s: Survey) => sum + (s.responseCount || 0), 0);
+      setSurveys(surveysWithCounts);
 
-				setStats({
-					total,
-					draft,
-					published,
-					responses: totalResponses
-				});
-			} else {
-				console.error('Failed to fetch surveys:', response.status, await response.text());
-			}
-		} catch (error) {
-			console.error('Error fetching surveys:', error);
-		} finally {
-			setLoading(false);
-		}
-	};
+      // Fetch the conductor's in-progress drafts (separate survey_drafts table)
+      let draftList: Draft[] = [];
+      try {
+        const draftsResponse = await fetch(`${surveyConfig.baseUrl}/api/v1/drafts/my`, {
+          credentials: 'include',
+        });
+        if (draftsResponse.ok) {
+          const draftsData = await draftsResponse.json();
+          draftList = draftsData.data || [];
+        } else {
+          console.warn('Failed to fetch drafts:', draftsResponse.status);
+        }
+      } catch (err) {
+        console.error('Error fetching drafts:', err);
+      }
+      setDrafts(draftList);
 
-	const StatCard = ({ title, value, icon: Icon, color }: any) => (
-		<Card>
-			<CardContent className="pt-6">
-				<div className="flex items-center justify-between">
-					<div>
-						<p className="text-sm font-medium text-gray-500">{title}</p>
-						<p className={`text-3xl font-bold mt-2 ${color}`}>{value}</p>
-					</div>
-					<div className={`p-3 rounded-full ${color.replace('text-', 'bg-').replace('600', '100')}`}>
-						<Icon className={`h-6 w-6 ${color}`} />
-					</div>
-				</div>
-			</CardContent>
-		</Card>
-	);
+      // Calculate stats
+      const totalResponses = surveysWithCounts.reduce((sum: number, s: Survey) => sum + (s.responseCount || 0), 0);
+      setStats({
+        total: surveysWithCounts.length + draftList.length,
+        draft: draftList.length,
+        published: surveysWithCounts.filter((s: Survey) => s.status === 'PUBLISHED').length,
+        responses: totalResponses
+      });
+    } catch (error) {
+      console.error('Error fetching surveys:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-	return (
-		<div className="min-h-screen bg-gray-50">
-			{/* Header */}
-			<header className="bg-white border-b border-gray-200">
-				<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-					<div className="flex items-center justify-between">
-						<div>
-							<h1 className="text-2xl font-bold text-gray-900">Conductor Dashboard</h1>
-							<p className="text-sm text-gray-500 mt-1">Welcome back, {user?.username}</p>
-						</div>
-						<div className="flex items-center gap-3">
-							{showParticipantButton && (
-								<Button 
-									onClick={() => router.push("/role-selection")} 
-									variant="secondary"
-									size="sm"
-								>
-									<Users className="h-4 w-4 mr-2" />
-									Become Participant
-								</Button>
-							)}
-							<Button onClick={() => router.push("/survey/create")} size="sm">
-								<Plus className="h-4 w-4 mr-2" />
-								New Survey
-							</Button>
-							<Button onClick={logout} variant="outline" size="sm">
-								<LogOut className="h-4 w-4 mr-2" />
-								Logout
-							</Button>
-						</div>
-					</div>
-				</div>
-			</header>
+  const handleDeleteDraft = async () => {
+    if (!draftDeleteTarget) return;
+    try {
+      const response = await fetch(`${surveyConfig.baseUrl}/api/v1/drafts/${draftDeleteTarget.draftId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to delete' }));
+        throw new Error(errorData.message || errorData.error?.message || 'Failed to delete draft');
+      }
+      toast.success(`Draft "${draftDeleteTarget.title}" deleted`);
+      setDraftDeleteTarget(null);
+      fetchSurveys();
+    } catch (error: any) {
+      console.error('Delete draft failed:', error);
+      toast.error(error.message || 'Failed to delete draft');
+    }
+  };
 
-			{/* Main Content */}
-			<main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-				{/* Stats Grid */}
-				<div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-					<StatCard 
-						title="Total Surveys" 
-						value={stats.total} 
-						icon={FileText} 
-						color="text-blue-600" 
-					/>
-					<StatCard 
-						title="Published" 
-						value={stats.published} 
-						icon={TrendingUp} 
-						color="text-green-600" 
-					/>
-					<StatCard 
-						title="Drafts" 
-						value={stats.draft} 
-						icon={Clock} 
-						color="text-yellow-600" 
-					/>
-					<StatCard 
-						title="Responses" 
-						value={stats.responses} 
-						icon={BarChart3} 
-						color="text-purple-600" 
-					/>
-				</div>
+  const handleLogout = async () => {
+    await logout();
+  };
 
-				{/* Surveys List */}
-				<Card>
-					<CardHeader>
-						<div className="flex items-center justify-between">
-							<CardTitle>My Surveys</CardTitle>
-							<Button 
-								variant="outline" 
-								size="sm"
-								onClick={() => router.push("/survey/create")}
-							>
-								<Plus className="h-4 w-4 mr-2" />
-								Create Survey
-							</Button>
-						</div>
-					</CardHeader>
-					<CardContent>
-						{loading ? (
-							<div className="text-center py-12">
-								<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-								<p className="text-gray-500 mt-3">Loading surveys...</p>
-							</div>
-						) : surveys.length === 0 ? (
-							<div className="text-center py-12">
-								<FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-								<h3 className="text-lg font-medium text-gray-900 mb-2">No surveys yet</h3>
-								<p className="text-gray-500 mb-6">Create your first survey to get started</p>
-								<Button onClick={() => router.push("/survey/create")}>
-									<Plus className="h-4 w-4 mr-2" />
-									Create Your First Survey
-								</Button>
-							</div>
-						) : (
-							<div className="space-y-4">
-								{surveys.map((survey) => (
-									<div 
-										key={survey.id}
-										className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer"
-										onClick={() => router.push(`/surveys/results/${survey.id}`)}
-									>
-										<div className="flex items-start justify-between">
-											<div className="flex-1">
-												<div className="flex items-center gap-3">
-													<h3 className="text-lg font-semibold text-gray-900">
-														{survey.title}
-													</h3>
-													<span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-														survey.status === 'PUBLISHED' 
-															? 'bg-green-100 text-green-800' 
-															: 'bg-yellow-100 text-yellow-800'
-													}`}>
-														{survey.status}
-													</span>
-												</div>
-												<p className="text-gray-600 mt-1 line-clamp-2">
-													{survey.description}
-												</p>
-												<div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
-													<span className="flex items-center gap-1">
-														<Clock className="h-4 w-4" />
-														{new Date(survey.created_at).toLocaleDateString()}
-													</span>
-													<span className="flex items-center gap-1">
-														<BarChart3 className="h-4 w-4" />
-														{survey.responseCount || 0} responses
-													</span>
-												</div>
-											</div>
-											<div className="flex gap-2">
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={(e) => {
-														e.stopPropagation();
-														router.push(`/surveys/${survey.id}/sharing`);
-													}}
-												>
-													<Share2 className="h-4 w-4 mr-2" />
-													Share
-												</Button>
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={(e) => {
-														e.stopPropagation();
-														router.push(`/surveys/results/${survey.id}`);
-													}}
-												>
-													View Results
-												</Button>
-											</div>
-										</div>
-									</div>
-								))}
-							</div>
-						)}
-					</CardContent>
-				</Card>
-			</main>
-		</div>
-	);
+  const handleCreateSurvey = () => {
+    router.push('/survey/create?new=true');
+  };
+
+  const handleSurveyClick = (surveyId: number, status: string) => {
+    if (status === 'PUBLISHED') {
+      // Go to distribution page for published surveys
+      router.push(`/survey/distribute/${surveyId}`);
+    } else {
+      // Go to edit page for drafts
+      router.push(`/survey/create?draftId=${surveyId}`);
+    }
+  };
+
+  const handleShare = (e: React.MouseEvent, surveyId: number) => {
+    e.stopPropagation();
+    router.push(`/survey/distribute/${surveyId}`);
+  };
+
+  const handleAnalytics = (e: React.MouseEvent, surveyId: number) => {
+    e.stopPropagation();
+    router.push(`/surveys/results/${surveyId}`);
+  };
+
+  const handleDeleteSurvey = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`${surveyConfig.baseUrl}/api/v1/surveys/${deleteTarget.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to delete' }));
+        throw new Error(errorData.message || errorData.error?.message || 'Failed to delete survey');
+      }
+
+      toast.success(`"${deleteTarget.title}" has been deleted`);
+      setDeleteTarget(null);
+      fetchSurveys();
+    } catch (error: any) {
+      console.error('Delete failed:', error);
+      toast.error(error.message || 'Failed to delete survey');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Conductor Dashboard</h1>
+              <p className="text-gray-600">Welcome back, {user?.username || 'Conductor'}</p>
+            </div>
+            <div className="flex gap-3">
+              {showParticipantButton && (
+                <Button variant="outline" onClick={() => {
+                  if (onSwitchToParticipant) {
+                    onSwitchToParticipant();
+                  }
+                }}>
+                  <Users className="w-4 h-4 mr-2" />
+                  Switch to Participant
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => router.push('/students/onboard')}>
+                <Users className="w-4 h-4 mr-2" />
+                Onboard Students
+              </Button>
+              <Button onClick={handleCreateSurvey}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create Survey
+              </Button>
+              <Button variant="ghost" onClick={handleLogout}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Total Surveys</CardTitle>
+              <FileText className="w-4 h-4 text-blue-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.total}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Drafts</CardTitle>
+              <Clock className="w-4 h-4 text-yellow-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.draft}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Published</CardTitle>
+              <TrendingUp className="w-4 h-4 text-green-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.published}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Total Responses</CardTitle>
+              <BarChart3 className="w-4 h-4 text-purple-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.responses}</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Surveys List */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Your Surveys</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="text-center py-8 text-gray-500">Loading surveys...</div>
+            ) : surveys.length === 0 && drafts.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500 mb-4">No surveys yet. Create your first survey!</p>
+                <Button onClick={handleCreateSurvey}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Survey
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Drafts (in-progress, not yet published) — shown first */}
+                {drafts.map((draft) => (
+                  <div
+                    key={`draft-${draft.draftId}`}
+                    className="flex items-center justify-between p-4 border border-amber-200 bg-amber-50/40 rounded-lg hover:bg-amber-50 cursor-pointer transition-colors"
+                    onClick={() => router.push(`/survey/create?draftId=${draft.draftId}`)}
+                  >
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-gray-900">{draft.title}</h3>
+                      <div className="flex items-center gap-4 mt-2">
+                        <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">
+                          DRAFT
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {draft.questionCount} {draft.questionCount === 1 ? 'question' : 'questions'}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          Last edited: {new Date(draft.updatedAt || draft.lastSaved).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); router.push(`/survey/create?draftId=${draft.draftId}`); }}
+                        title="Continue Editing Draft"
+                        className="text-amber-600 hover:text-amber-700 gap-1"
+                      >
+                        <Edit className="w-4 h-4" />
+                        <span className="text-xs">Continue Draft</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); setDraftDeleteTarget(draft); }}
+                        title="Delete Draft"
+                        className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {surveys.map((survey) => (
+                  <div
+                    key={survey.id}
+                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
+                    onClick={() => handleSurveyClick(survey.id, survey.status)}
+                  >
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-gray-900">{survey.title}</h3>
+                      <p className="text-sm text-gray-500 line-clamp-1">{survey.description}</p>
+                      <div className="flex items-center gap-4 mt-2">
+                        <span className={`text-xs px-2 py-1 rounded-full ${
+                          survey.status === 'PUBLISHED'
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {survey.status}
+                        </span>
+                        {survey.is_quiz && (
+                          <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">
+                            Quiz
+                          </span>
+                        )}
+                        {survey.requires_manual_evaluation && (
+                          <span className="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800">
+                            Manual Grading
+                          </span>
+                        )}
+                        <span className="text-xs text-gray-500">
+                          {survey.responseCount || 0} responses
+                        </span>
+                        {survey.pendingEvaluations !== undefined && survey.pendingEvaluations > 0 && (
+                          <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800">
+                            {survey.pendingEvaluations} pending
+                          </span>
+                        )}
+                        <span className="text-xs text-gray-500">
+                          Created: {new Date(survey.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      {survey.status === 'PUBLISHED' && (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={(e) => handleShare(e, survey.id)} title="Share & Distribute">
+                            <Share2 className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={(e) => handleAnalytics(e, survey.id)} title="View Results">
+                            <BarChart3 className="w-4 h-4" />
+                          </Button>
+                          {survey.requires_manual_evaluation && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => { e.stopPropagation(); router.push(`/surveys/evaluations/${survey.id}`); }}
+                              title="Pending Evaluations"
+                              className={survey.pendingEvaluations && survey.pendingEvaluations > 0 ? "text-orange-600 hover:text-orange-700" : ""}
+                            >
+                              <ClipboardCheck className="w-4 h-4" />
+                              {survey.pendingEvaluations && survey.pendingEvaluations > 0 && (
+                                <span className="ml-1 text-xs bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded-full">
+                                  {survey.pendingEvaluations}
+                                </span>
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); window.open(`/survey/take/${survey.id}?preview=true`, '_blank'); }}
+                            title="Preview Survey"
+                            className="text-purple-600 hover:text-purple-700"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); router.push(`/survey/create?editSurveyId=${survey.id}`); }}
+                            title="Edit Survey"
+                            className="text-blue-600 hover:text-blue-700"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                        </>
+                      )}
+                      {survey.status === 'DRAFT' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => { e.stopPropagation(); router.push(`/survey/create?draftId=${survey.id}`); }}
+                          title="Continue Editing Draft"
+                          className="text-amber-600 hover:text-amber-700 gap-1"
+                        >
+                          <Edit className="w-4 h-4" />
+                          <span className="text-xs">Continue Draft</span>
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(survey); }}
+                        title="Delete Survey"
+                        className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </main>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Survey</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <p>
+                Are you sure you want to delete <strong>&quot;{deleteTarget?.title}&quot;</strong>?
+              </p>
+              <p className="text-red-600 font-medium">
+                This will permanently delete everything related to this survey including all questions, responses, sessions, invitations, and analytics data. This action cannot be undone.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSurvey}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              {isDeleting ? "Deleting..." : "Delete Permanently"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Draft Confirmation Dialog */}
+      <AlertDialog open={!!draftDeleteTarget} onOpenChange={(open) => { if (!open) setDraftDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Draft</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the draft <strong>&quot;{draftDeleteTarget?.title}&quot;</strong>? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteDraft}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              Delete Draft
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
 }
-

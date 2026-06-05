@@ -2,10 +2,6 @@ import axios from 'axios';
 import { surveyConfig } from '@/lib/api-config';
 
 const API_BASE_URL = surveyConfig.baseUrl;
-const SURVEY_HOST = surveyConfig.host;
-
-// Configure axios to include Host header
-axios.defaults.headers.common['Host'] = SURVEY_HOST;
 
 export interface Survey {
   id: number;
@@ -53,7 +49,7 @@ export const surveyService = {
   async getSurvey(surveyId: string): Promise<Survey> {
     const response = await axios.get<ApiResponse<Survey>>(
       `${API_BASE_URL}${surveyConfig.paths.surveyById(surveyId)}`,
-      { headers: { 'Host': SURVEY_HOST } }
+      { withCredentials: true }
     );
     return response.data.data;
   },
@@ -61,7 +57,7 @@ export const surveyService = {
   async getProgress(surveyId: string): Promise<SurveyProgress> {
     const response = await axios.get(
       `${API_BASE_URL}${surveyConfig.paths.progress(surveyId)}`,
-      { headers: { 'Host': SURVEY_HOST } }
+      { withCredentials: true }
     );
     return response.data;
   },
@@ -70,7 +66,7 @@ export const surveyService = {
     await axios.post(
       `${API_BASE_URL}${surveyConfig.paths.answers}`,
       { surveyId, answers },
-      { headers: { 'Host': SURVEY_HOST } }
+      { withCredentials: true }
     );
   },
 }; 

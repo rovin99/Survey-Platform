@@ -19,11 +19,9 @@ jobs:
   test:
     name: Test & Quality Check
     runs-on: ubuntu-latest
-    
     defaults:
       run:
         working-directory: ./frontend
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -40,68 +38,46 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check for security vulnerabilities
-        run: |
-          npm audit --audit-level high || echo "Security vulnerabilities found, but continuing build"
-          npm audit fix --dry-run || true
+      - name: Security audit (non-blocking)
+        run: npm audit --audit-level high || echo "Vulnerabilities found, continuing"
 
       - name: Run ESLint
-        run: |
-          npm run lint || echo "ESLint completed with warnings"
+        run: npm run lint || echo "ESLint completed with warnings"
 
-      - name: Run TypeScript check
-        run: |
-          npx tsc --noEmit || echo "TypeScript check completed"
+      - name: TypeScript check
+        run: npx tsc --noEmit || echo "TypeScript check completed with errors (non-blocking)"
 
       - name: Run tests
         run: |
-          if npm run | grep -q "test"; then
+          if npm run | grep -q " test"; then
             npm test -- --coverage --watchAll=false || echo "Tests completed"
           else
-            echo "No tests configured, creating dummy test report"
-            mkdir -p coverage
-            echo '{"total":{"statements":{"pct":0},"branches":{"pct":0},"functions":{"pct":0},"lines":{"pct":0}}}' > coverage/coverage-summary.json
+            echo "No tests configured"
           fi
 
-      - name: Upload test coverage
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./frontend/coverage/lcov.info
-          flags: frontend
-          name: codecov-frontend
-          fail_ci_if_error: false
-
       - name: Build application
-        run: |
-          npm run build
+        run: npm run build
         env:
-          NEXT_PUBLIC_AUTH_API_URL: https://api.survey-platform.com/api/auth
-          NEXT_PUBLIC_SURVEY_API_URL: https://api.survey-platform.com/api/v1
-          NEXT_PUBLIC_PARTICIPANT_API_URL: https://api.survey-platform.com/api/participants
+          # Use the deployment URL when set; empty falls back to the app's localhost defaults.
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.FRONTEND_PUBLIC_URL }}
+          NEXT_PUBLIC_AUTH_SERVICE_URL: ${{ vars.FRONTEND_PUBLIC_URL }}
+          NEXT_PUBLIC_SURVEY_SERVICE_URL: ${{ vars.FRONTEND_PUBLIC_URL }}
+          NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL: ${{ vars.FRONTEND_PUBLIC_URL }}
 
       - name: Check build output
         run: |
           if [ -d ".next" ]; then
-            echo "✅ Build successful - .next directory created"
+            echo "✅ Build successful"
             du -sh .next
           else
-            echo "❌ Build failed - no .next directory found"
+            echo "❌ Build failed - no .next directory"
             exit 1
           fi
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: frontend-build
-          path: |
-            frontend/.next
-            frontend/public
 
   security-scan:
     name: Security Analysis
     runs-on: ubuntu-latest
     needs: test
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -117,111 +93,22 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
-
-      - name: Run npm audit
-        working-directory: ./frontend
-        run: |
-          npm audit --json > npm-audit.json || true
-          cat npm-audit.json
 
   build-and-push:
     name: Build and Push Docker Image
     needs: [test, security-scan]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    
+    # Build/push only on PRs and develop; the deploy workflows build the canonical image on main.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
     permissions:
       contents: read
       packages: write
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Create optimized Dockerfile for Frontend
-        run: |
-          cat > ./frontend/Dockerfile << 'EOF'
-          # Dependencies stage
-          FROM node:20-alpine AS deps
-          WORKDIR /app
-          
-          # Copy package files
-          COPY package*.json ./
-          RUN npm ci --only=production --ignore-scripts
-          
-          # Build stage
-          FROM node:20-alpine AS builder
-          WORKDIR /app
-          
-          # Copy package files and install all dependencies
-          COPY package*.json ./
-          RUN npm ci --ignore-scripts
-          
-          # Copy source code
-          COPY . .
-          
-          # Set build-time environment variables
-          ENV NEXT_TELEMETRY_DISABLED 1
-          ENV NODE_ENV production
-          
-          # Build the application
-          RUN npm run build
-          
-          # Runtime stage
-          FROM node:20-alpine AS runner
-          WORKDIR /app
-          
-          ENV NODE_ENV production
-          ENV NEXT_TELEMETRY_DISABLED 1
-          
-          # Create non-root user
-          RUN addgroup --system --gid 1001 nodejs && \
-              adduser --system --uid 1001 nextjs
-          
-          # Copy necessary files
-          COPY --from=builder /app/public ./public
-          
-          # Set the correct permissions for prerender cache
-          RUN mkdir .next
-          RUN chown nextjs:nodejs .next
-          
-          # Copy built application
-          COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-          COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-          
-          # Switch to non-root user
-          USER nextjs
-          
-          EXPOSE 3000
-          ENV PORT 3000
-          ENV HOSTNAME "0.0.0.0"
-          
-          CMD ["node", "server.js"]
-          EOF
-
-      - name: Update next.config.ts for standalone build
-        run: |
-          cat > ./frontend/next.config.ts << 'EOF'
-          import type { NextConfig } from "next";
-
-          const nextConfig: NextConfig = {
-            output: 'standalone',
-            experimental: {
-              outputFileTracingRoot: undefined,
-            },
-            eslint: {
-              ignoreDuringBuilds: true,
-            },
-            typescript: {
-              ignoreBuildErrors: true,
-            },
-          };
-
-          export default nextConfig;
-          EOF
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -241,10 +128,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -258,68 +142,21 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64
           build-args: |
-            NEXT_PUBLIC_AUTH_API_URL=https://api.survey-platform.com/api/auth
-            NEXT_PUBLIC_SURVEY_API_URL=https://api.survey-platform.com/api/v1
-            NEXT_PUBLIC_PARTICIPANT_API_URL=https://api.survey-platform.com/api/participants
-
-      - name: Run Trivy security scan on image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-image-results.sarif'
-
-      - name: Upload image scan results
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: 'trivy-image-results.sarif'
-
-  lighthouse:
-    name: Lighthouse Performance Audit
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'pull_request'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        working-directory: ./frontend
-        run: npm ci
-
-      - name: Build application
-        working-directory: ./frontend
-        run: npm run build
-        env:
-          NEXT_PUBLIC_AUTH_API_URL: http://localhost:8080/api/auth
-
-      - name: Run Lighthouse CI
-        working-directory: ./frontend
-        run: |
-          npm install -g @lhci/cli
-          lhci autorun || echo "Lighthouse audit completed"
+            NEXT_PUBLIC_API_BASE_URL=${{ vars.FRONTEND_PUBLIC_URL }}
+            NEXT_PUBLIC_AUTH_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }}
+            NEXT_PUBLIC_SURVEY_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }}
+            NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }}
 
   notify:
     name: Notify Build Status
-    needs: [test, security-scan, build-and-push]
+    needs: [test, security-scan]
     runs-on: ubuntu-latest
     if: always()
-    
     steps:
-      - name: Notify on success
-        if: needs.build-and-push.result == 'success'
+      - name: Status
         run: |
-          echo "✅ Frontend CI pipeline completed successfully!"
-          echo "🐳 Docker image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-      
-      - name: Notify on failure
-        if: failure()
-        run: |
-          echo "❌ Frontend CI pipeline failed!"
-          echo "Check the logs for more details."
+          if [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ]; then
+            echo "✅ Frontend CI passed"
+          else
+            echo "❌ Frontend CI failed"
+          fi

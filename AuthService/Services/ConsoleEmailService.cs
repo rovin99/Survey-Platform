@@ -15,17 +15,6 @@ namespace AuthService.Services
             _logger = logger;
         }
 
-        public async Task SendVerificationEmailAsync(string email)
-        {
-            _logger.LogInformation("=== EMAIL SERVICE ===");
-            _logger.LogInformation("To: {Email}", email);
-            _logger.LogInformation("Subject: Email Verification");
-            _logger.LogInformation("Content: Please verify your email address");
-            _logger.LogInformation("====================");
-
-            await Task.CompletedTask;
-        }
-
         public async Task SendMagicLinkAsync(string email, string magicLink, string? username = null)
         {
             _logger.LogInformation("=== MAGIC LINK EMAIL ===");

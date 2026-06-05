@@ -82,7 +82,7 @@ namespace AuthService.Controllers
             var tokenDescriptor = new Microsoft.IdentityModel.Tokens.SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddMinutes(15), // Short-lived token for service calls
+                Expires = DateTime.UtcNow.AddMinutes(60), // 1 hour token for service calls
                 SigningCredentials = new Microsoft.IdentityModel.Tokens.SigningCredentials(
                     new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(key), 
                     Microsoft.IdentityModel.Tokens.SecurityAlgorithms.HmacSha256Signature),

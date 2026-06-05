@@ -1,0 +1,245 @@
+services:
+  # Nginx Reverse Proxy - Single entry point on port 3000
+  nginx:
+    image: nginx:alpine
+    container_name: survey-proxy
+    ports:
+      - "3000:80"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - default
+      - piston_net  # Nginx is the ONLY service that can reach Piston
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      survey-service:
+        condition: service_healthy
+      participants-service:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+
+  # MinIO Object Storage - S3-compatible media storage
+  minio:
+    image: minio/minio:latest
+    container_name: survey-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # MinIO bucket initialization (runs once then exits)
+  minio-init:
+    image: minio/mc:latest
+    container_name: survey-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        mc alias set myminio http://minio:9000 minioadmin minioadmin
+        mc mb --ignore-existing myminio/survey-uploads
+        mc anonymous set download myminio/survey-uploads
+        echo "Bucket 'survey-uploads' ready!"
+    restart: "no"
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: survey-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: SurveyDb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # AuthService (.NET)
+  auth-service:
+    build:
+      context: ./AuthService
+      dockerfile: Dockerfile
+    container_name: survey-auth-service
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
+      - CORS_ORIGINS=http://10.7.48.232:8081,http://10.7.48.232:3000,http://10.7.48.232:8082
+      - CONNECTION_STRING=Host=postgres;Database=SurveyDb;Username=postgres;Password=postgres
+      - JWT_KEY=survey-platform-jwt-secret-key-change-this-in-production-min-32-chars
+      - JWT_ISSUER=AuthService
+      - JWT_AUDIENCE=SurveyApp
+      - JWT_DURATION=60
+      - FRONTEND_URL=http://localhost:3000
+      - APP_BASE_URL=http://localhost:3000
+      - EmailService__UseExternalService=true
+      - EmailService__BaseUrl=http://survey-service:8080/api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # SurveyManagementService (Go)
+  survey-service:
+    build:
+      context: ./SurveyManagementService
+      dockerfile: Dockerfile
+    container_name: survey-management-service
+    environment:
+      - DB_HOST=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=SurveyDb
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
+      - PORT=8080
+      - AUTH_SERVICE_URL=http://auth-service:5000
+      - JWT_SECRET_KEY=survey-platform-jwt-secret-key-change-this-in-production-min-32-chars
+      - JWT_ISSUER=AuthService
+      - JWT_AUDIENCE=SurveyApp
+      - EMAIL=rovin9325@gmail.com
+      - APP_PASS=qrls wiqy wdmb cwjs
+      - FRONTEND_URL=http://localhost:3000
+      - INTERNAL_API_KEY=internal-service-key-dev-only
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=survey-uploads
+      - MINIO_USE_SSL=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # ParticipantsManagementService (Go)
+  participants-service:
+    build:
+      context: ./ParticipantsManagementService
+      dockerfile: Dockerfile
+    container_name: participants-management-service
+    environment:
+      - DB_HOST=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=SurveyDb
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
+      - PORT=8081
+      - AUTH_SERVICE_URL=http://auth-service:5000
+      - SURVEY_SERVICE_URL=http://survey-service:8080
+      - JWT_SECRET_KEY=survey-platform-jwt-secret-key-change-this-in-production-min-32-chars
+      - JWT_ISSUER=AuthService
+      - JWT_AUDIENCE=SurveyApp
+      - APP_ENV=development
+      - INTERNAL_API_KEY=internal-service-key-dev-only
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=survey-uploads
+      - MINIO_USE_SSL=false
+      - PISTON_URL=http://piston:2000
+    networks:
+      - default
+      - piston_net  # Needs access to Piston for server-side code evaluation
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+        - NEXT_PUBLIC_AUTH_SERVICE_URL=http://localhost:3000
+        - NEXT_PUBLIC_SURVEY_SERVICE_URL=http://localhost:3000
+        - NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL=http://localhost:3000
+        - NEXT_PUBLIC_AUTH_HOST=
+        - NEXT_PUBLIC_SURVEY_HOST=
+        - NEXT_PUBLIC_PARTICIPANTS_HOST=
+    container_name: survey-frontend
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+  # Piston - Code Execution Engine (isolated network — only nginx + participants-service can reach it)
+  piston:
+    image: ghcr.io/engineer-man/piston
+    container_name: survey-piston
+    privileged: true
+    volumes:
+      - piston_data:/piston
+    tmpfs:
+      - /piston/jobs:exec,size=256m,mode=777
+      - /tmp:exec,size=128m
+    networks:
+      - piston_net  # Isolated — NOT on default network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2000/api/v2/runtimes"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+networks:
+  piston_net:
+    driver: bridge
+    # Isolated network: only nginx and participants-service are connected
+
+volumes:
+  postgres_data:
+  piston_data:
+  minio_data:

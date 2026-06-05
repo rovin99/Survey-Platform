@@ -1,0 +1,78 @@
+# ConfigMaps for all services. __VM_IP__ is replaced by deploy-k3s.sh with the VM's address
+# (e.g. http://203.0.113.10). Inter-service URLs use short Service names (see app manifests).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+  namespace: default
+data:
+  # Development => cookies are NOT marked Secure, so they work over plain HTTP (IP deployment).
+  ASPNETCORE_ENVIRONMENT: "Development"
+  ASPNETCORE_URLS: "http://+:5000"
+  JWT_ISSUER: "AuthService"
+  JWT_AUDIENCE: "SurveyApp"
+  JWT_DURATION: "60"
+  APP_BASE_URL: "http://__VM_IP__"
+  FRONTEND_URL: "http://__VM_IP__"
+  CORS_ORIGINS: "http://__VM_IP__"
+  EmailService__UseExternalService: "true"
+  EmailService__BaseUrl: "http://survey-service:8080/api"
+  EmailService__TimeoutSeconds: "30"
+  SurveyService__BaseUrl: "http://survey-service:8080"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: survey-service-config
+  namespace: default
+data:
+  ENVIRONMENT: "production"
+  DB_HOST: "postgres-db.database.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "SurveyDb"
+  DB_SSLMODE: "disable"   # in-cluster Postgres has no TLS
+  PORT: "8080"
+  JWT_ISSUER: "AuthService"
+  JWT_AUDIENCE: "SurveyApp"
+  AUTH_SERVICE_URL: "http://auth-service:5000"
+  MINIO_ENDPOINT: "minio.storage.svc.cluster.local:9000"
+  MINIO_BUCKET: "survey-uploads"
+  MINIO_USE_SSL: "false"
+  FRONTEND_URL: "http://__VM_IP__"
+  CORS_ORIGINS: "http://__VM_IP__"
+  TZ: "UTC"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: participants-service-config
+  namespace: default
+data:
+  APP_ENV: "production"
+  DB_HOST: "postgres-db.database.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "SurveyDb"
+  DB_SSLMODE: "disable"
+  PORT: "8081"
+  JWT_ISSUER: "AuthService"
+  JWT_AUDIENCE: "SurveyApp"
+  AUTH_SERVICE_URL: "http://auth-service:5000"
+  SURVEY_SERVICE_URL: "http://survey-service:8080"
+  MINIO_ENDPOINT: "minio.storage.svc.cluster.local:9000"
+  MINIO_BUCKET: "survey-uploads"
+  MINIO_USE_SSL: "false"
+  PISTON_URL: "http://piston:2000"   # Piston not deployed on this VM; code-execution questions won't run
+  CORS_ORIGINS: "http://__VM_IP__"
+  TZ: "UTC"
+  LOG_LEVEL: "info"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: default
+data:
+  # NOTE: NEXT_PUBLIC_* are baked at BUILD time (see build-and-push.sh). These runtime values are
+  # informational only — the image must be built with --build-arg NEXT_PUBLIC_*=http://__VM_IP__.
+  NODE_ENV: "production"

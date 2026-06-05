@@ -67,7 +67,7 @@ export default function SurveyAnalysis() {
 		<div className="container mx-auto py-6 space-y-6">
 			<div className="flex items-center justify-between">
 				<div className="flex items-center space-x-2 text-sm text-muted-foreground">
-					<Link href="/surveys" className="hover:text-foreground">
+					<Link href="/dashboard" className="hover:text-foreground">
 						Surveys
 					</Link>
 					<ChevronRight className="h-4 w-4" />

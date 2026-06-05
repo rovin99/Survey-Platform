@@ -7,19 +7,35 @@ export interface SurveyOption {
   orderIndex: number;
 }
 
+export interface CodeTestCase {
+  id: string;
+  input: string;
+  expectedOutput: string;
+  hidden?: boolean;
+}
+
+export interface CodeSettings {
+  defaultLanguage?: string;
+  allowedLanguages?: string[];
+  testCases?: CodeTestCase[];
+  starterCode?: Record<string, string>;
+}
+
 export interface SurveyQuestion {
   id: number;
   surveyId: number;
   questionText: string;
-  questionType: "multiple-choice" | "single-choice" | "text" | "rating";
+  questionType: "multiple-choice" | "single-choice" | "text" | "rating" | "code" | "image-upload";
   mandatory: boolean;
-  branchingLogic?: string | null;
   correctAnswers?: string | null;
   points?: number;
   explanation?: string;
+  requiresJustification?: boolean;
+  justificationRequired?: boolean;
   orderIndex: number;
   options?: SurveyOption[];
   mediaFiles?: SurveyMediaFile[];
+  codeSettings?: CodeSettings | string; // For code questions
 }
 
 export interface SurveyMediaFile {
@@ -52,11 +68,13 @@ export interface SurveyDetail {
   conductorId: number;
   status: string;
   isSelfRecruitment: boolean;
+  questionDisplayMode?: 'one_by_one' | 'all_at_once';
   isQuiz?: boolean;
   timeLimitMinutes?: number;
   passingScorePercentage?: number;
   showCorrectAnswers?: boolean;
   shuffleQuestions?: boolean;
+  shuffleOptions?: boolean;
   questions: SurveyQuestion[];
 }
 
@@ -66,6 +84,7 @@ export interface SurveySession {
   participantId: number;
   sessionStatus: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "ABANDONED";
   lastQuestionId?: number | null;
+  session_token?: string; // Token for anonymous session access
   createdAt: string;
   updatedAt: string;
 }
@@ -86,6 +105,7 @@ export interface SessionResponse {
 export interface Answer {
   questionId: number;
   responseData: string; // JSON string
+  justification?: string; // Participant-authored reason for choice answers (anti-cheating)
 }
 
 export interface SavedAnswer extends Answer {
@@ -96,6 +116,8 @@ export interface SavedAnswer extends Answer {
 export interface SubmitSurveyRequest {
   answers: Answer[];
   completedAt: string;
+  participantEmail?: string; // For invitation tracking
+  tabSwitchCount?: number;   // Anti-cheating: tab switch count
 }
 
 export interface SubmitSurveyResponse {

@@ -2,17 +2,25 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: frontend-config
+  namespace: default
+  labels:
+    app: frontend
 data:
-  # Use ngrok public URL (all requests go through ngrok tunnel)
-  # ngrok → Kourier → Services (with Host header routing)
-  NEXT_PUBLIC_API_BASE_URL: "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
-  NEXT_PUBLIC_AUTH_SERVICE_URL: "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
-  NEXT_PUBLIC_SURVEY_SERVICE_URL: "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
-  NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL: "https://trypanosomic-tamisha-imbricately.ngrok-free.dev"
-  
-  # Host headers for Kourier routing (used by api-config.ts)
-  NEXT_PUBLIC_AUTH_HOST: "auth-service.default.127.0.0.1.nip.io"
-  NEXT_PUBLIC_SURVEY_HOST: "survey-management-service.default.127.0.0.1.nip.io"
-  NEXT_PUBLIC_PARTICIPANTS_HOST: "participants-management-service.default.127.0.0.1.nip.io"
-  NEXT_PUBLIC_FRONTEND_HOST: "frontend.default.127.0.0.1.nip.io"
+  # Base URLs for API services
+  # In Knative, all services are behind a single ingress (Kourier/Istio).
+  # The frontend sends requests to the same origin, and the gateway routes
+  # based on path or Host header.
+  #
+  # Replace "your-production-domain.com" with your actual domain.
+  NEXT_PUBLIC_API_BASE_URL: "https://your-production-domain.com"
+  NEXT_PUBLIC_AUTH_SERVICE_URL: "https://your-production-domain.com"
+  NEXT_PUBLIC_SURVEY_SERVICE_URL: "https://your-production-domain.com"
+  NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL: "https://your-production-domain.com"
 
+  # Host headers for Kourier routing (Knative generates these)
+  # These are the internal Knative service hostnames used for Host-based routing.
+  # Update if your Knative domain config differs from the default.
+  NEXT_PUBLIC_AUTH_HOST: "auth-service.default.svc.cluster.local"
+  NEXT_PUBLIC_SURVEY_HOST: "survey-management-service.default.svc.cluster.local"
+  NEXT_PUBLIC_PARTICIPANTS_HOST: "participants-management-service.default.svc.cluster.local"
+  NEXT_PUBLIC_FRONTEND_HOST: "frontend.default.svc.cluster.local"

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/joho/godotenv"
@@ -23,6 +24,7 @@ import (
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/routes"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/Service"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Utils/storage"
 )
 
 func setupDatabase() (*gorm.DB, error) {
@@ -50,7 +52,9 @@ func setupDatabase() (*gorm.DB, error) {
 	log.Printf("Connecting to database: host=%s dbname=%s user=%s port=%s sslmode=%s", 
 		dbHost, dbName, dbUser, dbPort, dbSSLMode)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +71,7 @@ func setupDatabase() (*gorm.DB, error) {
 		&models.BranchingRule{},
 		&models.SurveyAccessControl{},
 		&models.SurveyAccessLog{},
+		&models.SurveyInvitation{},
 	)
 	if err != nil {
 		return nil, err
@@ -92,6 +97,7 @@ type AllRepositories struct {
 	AnswerRepo      repository.AnswerRepository
 	SessionRepo     repository.SurveySessionRepository
 	AccessRepo      repository.SurveyAccessRepository
+	MediaRepo       repository.SurveyMediaRepository
 }
 
 type AllServices struct {
@@ -103,12 +109,15 @@ type AllServices struct {
 }
 
 type AllHandlers struct {
-	SurveyHandler   *handler.SurveyHandler
-	QuestionHandler *handler.QuestionHandler
-	OptionHandler   *handler.OptionHandler
-	AnswerHandler   *handler.AnswerHandler
-	EmailHandler    *handler.EmailHandler
-	AccessHandler   *handler.SurveyAccessHandler
+	SurveyHandler     *handler.SurveyHandler
+	QuestionHandler   *handler.QuestionHandler
+	OptionHandler     *handler.OptionHandler
+	AnswerHandler     *handler.AnswerHandler
+	EmailHandler      *handler.EmailHandler
+	AccessHandler     *handler.SurveyAccessHandler
+	InvitationHandler *handler.InvitationHandler
+	OTPHandler        *handler.OTPHandler
+	MediaHandler      *handler.MediaHandler
 }
 
 func setupRepositories(db *gorm.DB) AllRepositories {
@@ -120,6 +129,7 @@ func setupRepositories(db *gorm.DB) AllRepositories {
 		AnswerRepo:      repository.NewAnswerRepository(db),
 		SessionRepo:     repository.NewSurveySessionRepository(db),
 		AccessRepo:      repository.NewSurveyAccessRepository(db),
+		MediaRepo:       repository.NewSurveyMediaRepository(db),
 	}
 }
 
@@ -133,16 +143,32 @@ func setupServices(repos AllRepositories) AllServices {
 	}
 }
 
-func setupHandlers(services AllServices) AllHandlers {
+func setupHandlers(services AllServices, repos AllRepositories, db *gorm.DB) AllHandlers {
 	emailService := service.NewEmailService()
+	invitationService := service.NewInvitationService(db, emailService)
+
+	storageClient, err := storage.NewStorageClient(
+		getEnvOrDefault("MINIO_ENDPOINT", "localhost:9000"),
+		getEnvOrDefault("MINIO_ACCESS_KEY", "minioadmin"),
+		getEnvOrDefault("MINIO_SECRET_KEY", "minioadmin"),
+		getEnvOrDefault("MINIO_BUCKET", "survey-uploads"),
+		getEnvOrDefault("MINIO_USE_SSL", "false") == "true",
+	)
+	if err != nil {
+		log.Printf("WARNING: MinIO storage not available: %v (media uploads will fail)", err)
+	}
+	mediaService := service.NewMediaService(storageClient, repos.MediaRepo)
 
 	return AllHandlers{
-		SurveyHandler:   handler.NewSurveyHandler(services.SurveyService),
-		QuestionHandler: handler.NewQuestionHandler(services.QuestionService),
-		OptionHandler:   handler.NewOptionHandler(services.OptionService),
-		AnswerHandler:   handler.NewAnswerHandler(services.AnswerService),
-		EmailHandler:    handler.NewEmailHandler(emailService),
-		AccessHandler:   handler.NewSurveyAccessHandler(services.AccessService),
+		SurveyHandler:     handler.NewSurveyHandler(services.SurveyService),
+		QuestionHandler:   handler.NewQuestionHandler(services.QuestionService),
+		OptionHandler:     handler.NewOptionHandler(services.OptionService),
+		AnswerHandler:     handler.NewAnswerHandler(services.AnswerService),
+		EmailHandler:      handler.NewEmailHandler(emailService),
+		AccessHandler:     handler.NewSurveyAccessHandler(services.AccessService),
+		InvitationHandler: handler.NewInvitationHandler(invitationService),
+		OTPHandler:        handler.NewOTPHandler(service.NewOTPService(emailService), services.AccessService),
+		MediaHandler:      handler.NewMediaHandler(mediaService),
 	}
 }
 
@@ -154,9 +180,10 @@ func main() {
 
 	repos := setupRepositories(db)
 	services := setupServices(repos)
-	handlers := setupHandlers(services)
+	handlers := setupHandlers(services, repos, db)
 
 	app := fiber.New(fiber.Config{
+		BodyLimit: 6 * 1024 * 1024, // 6MB to allow 5MB files + form overhead
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			log.Printf("Error: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -168,12 +195,13 @@ func main() {
 	})
 
 	// Configure CORS to allow credentials from frontend
+	corsOrigins := getEnvOrDefault("CORS_ORIGINS", "http://localhost:3000")
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "http://localhost:3000,http://localhost:5171",
+		AllowOrigins:     corsOrigins,
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
-		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,Cookie",
 		AllowCredentials: true,
-		ExposeHeaders:    "Content-Length,Content-Type",
+		ExposeHeaders:    "Content-Length,Content-Type,Set-Cookie",
 		MaxAge:           3600,
 	}))
 
@@ -297,11 +325,40 @@ func main() {
 	// Setup email routes without authentication (for AuthService to call)
 	routes.SetupEmailRoutes(publicApi, handlers.EmailHandler)
 
-	// Public access validation (no authentication - for anonymous users)
-	publicApi.Post("/v1/surveys/public/validate-access", handlers.AccessHandler.ValidateAccess)
+	// Rate limiting for public survey access endpoints
+	// Prevents brute force attacks and abuse of share links
+	publicSurveyLimiter := limiter.New(limiter.Config{
+		Max:        10,              // 10 requests
+		Expiration: 1 * time.Minute, // per minute
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP() // Rate limit by IP address
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			log.Printf("[RATE_LIMIT] IP %s exceeded rate limit for public survey access", c.IP())
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"success": false,
+				"error":   "Too many requests",
+				"message": "Rate limit exceeded. Please try again in a minute.",
+			})
+		},
+	})
 
-	// Public endpoint to get survey details (for participants/anonymous users)
-	publicApi.Get("/v1/surveys/:id", handlers.SurveyHandler.GetSurvey)
+	// Public access validation (no authentication - for anonymous users)
+	// Apply rate limiting to prevent abuse
+	publicApi.Post("/v1/surveys/public/validate-access", publicSurveyLimiter, handlers.AccessHandler.ValidateAccess)
+	publicApi.Post("/v1/surveys/public/validate-invitation", publicSurveyLimiter, handlers.AccessHandler.ValidateInvitation)
+	
+	// OTP verification for organization access (public, rate limited)
+	publicApi.Post("/v1/surveys/public/send-otp", publicSurveyLimiter, handlers.OTPHandler.SendOTP)
+	publicApi.Post("/v1/surveys/public/verify-otp", publicSurveyLimiter, handlers.OTPHandler.VerifyOTP)
+
+	// Internal API endpoints for service-to-service communication
+	// These use API key authentication instead of JWT
+	internalApi := app.Group("/internal/api/v1")
+	internalApi.Use(middlewares.InternalAPIKeyMiddleware())
+	internalApi.Get("/surveys/:id", handlers.SurveyHandler.GetSurveyInternal)
+	internalApi.Get("/surveys/:surveyId/access-logs", handlers.AccessHandler.GetAccessLogsInternal)
+	internalApi.Post("/surveys/:surveyId/invitation/complete", handlers.InvitationHandler.MarkInvitationCompleted)
 
 	// Create a new group for authenticated routes with v1 prefix
 	api := app.Group("/api/v1")
@@ -313,6 +370,12 @@ func main() {
 	routes.SetupQuestionRoutes(api, handlers.QuestionHandler)
 	routes.SetupOptionRoutes(api, handlers.OptionHandler)
 	routes.SetupAnswerRoutes(api, handlers.AnswerHandler)
+
+	// Survey invitation routes (conductor endpoints - authenticated)
+	routes.SetupInvitationRoutes(app, handlers.InvitationHandler)
+
+	// Media upload route (authenticated)
+	api.Post("/media/upload", handlers.MediaHandler.UploadMedia)
 
 	// Survey sharing routes (conductor endpoints - authenticated)
 	api.Post("/surveys/:surveyId/sharing/enable", handlers.AccessHandler.EnableSharing)

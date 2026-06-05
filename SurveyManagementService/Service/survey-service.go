@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
@@ -18,7 +20,7 @@ import (
 type SurveyService interface {
 	CreateSurvey(ctx context.Context, survey *models.Survey) error
 	SaveSection(ctx context.Context, surveyID uint, questions []models.Question, mediaFiles []models.SurveyMediaFile, branchingRules []models.BranchingRule) error
-	CreateDraft(ctx context.Context, surveyID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error)
+	CreateDraft(ctx context.Context, surveyID, conductorID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error)
 	UpdateDraft(ctx context.Context, draftID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error)
 	PublishSurvey(ctx context.Context, surveyID uint) error
 	GetProgress(ctx context.Context, surveyID uint) (*SurveyProgress, error)
@@ -27,6 +29,9 @@ type SurveyService interface {
 	PublishDraftToSurvey(ctx context.Context, draftID uint) (uint, error)
 	GetLatestDraft(ctx context.Context, surveyID uint) (*models.SurveyDraft, error)
 	ListSurveysByConductor(ctx context.Context, conductorID uint) ([]models.Survey, error)
+	ListDraftsByConductor(ctx context.Context, conductorID uint) ([]models.SurveyDraft, error)
+	DeleteDraft(ctx context.Context, draftID uint, conductorID uint) error
+	DeleteSurvey(ctx context.Context, surveyID uint, conductorID uint) error
 }
 
 type SurveyProgress struct {
@@ -101,11 +106,21 @@ func prettyPrintJSON(content models.JSONContent) string {
 	return string(content)
 }
 
+// normalizeDisplayMode ensures a valid display mode (GORM's column default only applies on
+// zero-value inserts, so an empty string on update would otherwise persist as blank).
+func normalizeDisplayMode(mode string) string {
+	if mode != "all_at_once" {
+		return "one_by_one"
+	}
+	return mode
+}
+
 // Helper function to create a new draft object
-func newDraft(surveyID uint, content models.JSONContent, lastEditedQuestion uint) *models.SurveyDraft {
+func newDraft(surveyID, conductorID uint, content models.JSONContent, lastEditedQuestion uint) *models.SurveyDraft {
 	now := time.Now()
 	return &models.SurveyDraft{
 		SurveyID:           surveyID,
+		ConductorID:        conductorID, // 🔐 Track who owns this draft
 		DraftContent:       content,
 		LastEditedQuestion: lastEditedQuestion,
 		LastSaved:          now,
@@ -114,9 +129,9 @@ func newDraft(surveyID uint, content models.JSONContent, lastEditedQuestion uint
 	}
 }
 
-func (s *surveyService) CreateDraft(ctx context.Context, surveyID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error) {
-	log.Printf("Service creating draft with content: %s", prettyPrintJSON(content))
-	draft := newDraft(surveyID, content, lastEditedQuestion)
+func (s *surveyService) CreateDraft(ctx context.Context, surveyID, conductorID uint, content models.JSONContent, lastEditedQuestion uint) (*models.SurveyDraft, error) {
+	log.Printf("Service creating draft for conductor %d with content: %s", conductorID, prettyPrintJSON(content))
+	draft := newDraft(surveyID, conductorID, content, lastEditedQuestion)
 	return s.surveyDraftRepo.CreateDraft(ctx, draft)
 }
 
@@ -188,11 +203,26 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 	// Parse the draft content
 	var draftContent struct {
 		BasicInfo struct {
-			Title             string `json:"title"`
-			Description       string `json:"description"`
-			IsSelfRecruitment bool   `json:"is_self_recruitment"`
-			ConductorID       uint   `json:"conductor_id"`
-			Status            string `json:"status"`
+			Title                  string `json:"title"`
+			Description            string `json:"description"`
+			IsSelfRecruitment      bool   `json:"is_self_recruitment"`
+			ConductorID            uint   `json:"conductor_id"`
+			Status                 string `json:"status"`
+			// Distribution settings
+			AllowAnonymous         bool   `json:"allow_anonymous"`
+			// Display mode
+			QuestionDisplayMode    string `json:"question_display_mode"`
+			// Quiz-specific fields
+			IsQuiz                   bool   `json:"is_quiz"`
+			TimeLimitMinutes         *int   `json:"time_limit_minutes"`
+			PassingScorePercentage   *int   `json:"passing_score_percentage"`
+			ShowCorrectAnswers       bool   `json:"show_correct_answers"`
+			ShuffleQuestions         bool   `json:"shuffle_questions"`
+			ShuffleOptions           bool   `json:"shuffle_options"`
+			MaxAttempts              *int   `json:"max_attempts"`
+			RequiresManualEvaluation bool   `json:"requires_manual_evaluation"`
+			// Custom participant fields
+			ParticipantFields      datatypes.JSON `json:"participant_fields"`
 		} `json:"basicInfo"`
 		Questions []struct {
 			QuestionID     uint   `json:"question_id"`
@@ -201,6 +231,12 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 			Mandatory      bool   `json:"mandatory"`
 			BranchingLogic string `json:"branching_logic"`
 			CorrectAnswers string `json:"correct_answers"`
+			// Quiz-specific fields
+			Points      int    `json:"points"`
+			Explanation string `json:"explanation"`
+			// Participant justification settings (choice questions)
+			RequiresJustification bool `json:"requires_justification"`
+			JustificationRequired bool `json:"justification_required"`
 		} `json:"questions"`
 		Options []struct {
 			OptionText string `json:"option_text"`
@@ -220,6 +256,10 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 		return 0, err
 	}
 
+	// SECURITY: Use ConductorID from draft record (set at creation), NOT from request body
+	// This prevents conductor ID spoofing attacks
+	trustedConductorID := draft.ConductorID
+
 	// Begin a transaction
 	return s.surveyRepo.TransactionWithResult(ctx, func(tx *gorm.DB) (uint, error) {
 		// Check if survey exists or create a new one
@@ -232,13 +272,29 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 			if err == nil {
 				// Survey exists, update it
 				log.Printf("Updating existing survey with ID %d", draft.SurveyID)
-				
+
 				// Update basic info
 				existingSurvey.Title = draftContent.BasicInfo.Title
 				existingSurvey.Description = draftContent.BasicInfo.Description
 				existingSurvey.IsSelfRecruitment = draftContent.BasicInfo.IsSelfRecruitment
 				existingSurvey.Status = "PUBLISHED"
 				existingSurvey.UpdatedAt = time.Now()
+				// Update distribution settings
+				existingSurvey.AllowAnonymous = draftContent.BasicInfo.AllowAnonymous
+				existingSurvey.QuestionDisplayMode = normalizeDisplayMode(draftContent.BasicInfo.QuestionDisplayMode)
+				// Update quiz-specific fields
+				existingSurvey.IsQuiz = draftContent.BasicInfo.IsQuiz
+				existingSurvey.TimeLimitMinutes = draftContent.BasicInfo.TimeLimitMinutes
+				existingSurvey.PassingScorePercentage = draftContent.BasicInfo.PassingScorePercentage
+				existingSurvey.ShowCorrectAnswers = draftContent.BasicInfo.ShowCorrectAnswers
+				existingSurvey.ShuffleQuestions = draftContent.BasicInfo.ShuffleQuestions
+				existingSurvey.ShuffleOptions = draftContent.BasicInfo.ShuffleOptions
+				existingSurvey.MaxAttempts = draftContent.BasicInfo.MaxAttempts
+				existingSurvey.RequiresManualEvaluation = draftContent.BasicInfo.RequiresManualEvaluation
+				// Update custom participant fields
+				if len(draftContent.BasicInfo.ParticipantFields) > 0 {
+					existingSurvey.ParticipantFields = draftContent.BasicInfo.ParticipantFields
+				}
 
 				if err := s.surveyRepo.UpdateWithTx(ctx, tx, existingSurvey); err != nil {
 					return 0, err
@@ -262,16 +318,27 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 			} else {
 				// If survey doesn't exist, treat as new survey
 				log.Printf("Survey with ID %d not found, creating new survey instead", draft.SurveyID)
-				
-				// Create new survey
+
+				// SECURITY: Use trustedConductorID from draft, not from request body
 				survey = models.Survey{
-					Title:             draftContent.BasicInfo.Title,
-					Description:       draftContent.BasicInfo.Description,
-					IsSelfRecruitment: draftContent.BasicInfo.IsSelfRecruitment,
-					ConductorID:       draftContent.BasicInfo.ConductorID,
-					Status:            "PUBLISHED",
-					CreatedAt:         time.Now(),
-					UpdatedAt:         time.Now(),
+					Title:                    draftContent.BasicInfo.Title,
+					Description:              draftContent.BasicInfo.Description,
+					IsSelfRecruitment:        draftContent.BasicInfo.IsSelfRecruitment,
+					ConductorID:              trustedConductorID, // SECURITY: Use trusted ID
+					Status:                   "PUBLISHED",
+					AllowAnonymous:           draftContent.BasicInfo.AllowAnonymous,
+					QuestionDisplayMode:      normalizeDisplayMode(draftContent.BasicInfo.QuestionDisplayMode),
+					IsQuiz:                   draftContent.BasicInfo.IsQuiz,
+					TimeLimitMinutes:         draftContent.BasicInfo.TimeLimitMinutes,
+					PassingScorePercentage:   draftContent.BasicInfo.PassingScorePercentage,
+					ShowCorrectAnswers:       draftContent.BasicInfo.ShowCorrectAnswers,
+					ShuffleQuestions:         draftContent.BasicInfo.ShuffleQuestions,
+					ShuffleOptions:           draftContent.BasicInfo.ShuffleOptions,
+					MaxAttempts:              draftContent.BasicInfo.MaxAttempts,
+					RequiresManualEvaluation: draftContent.BasicInfo.RequiresManualEvaluation,
+					ParticipantFields:        draftContent.BasicInfo.ParticipantFields,
+					CreatedAt:                time.Now(),
+					UpdatedAt:                time.Now(),
 				}
 
 				if err := s.surveyRepo.CreateWithTx(ctx, tx, &survey); err != nil {
@@ -281,15 +348,26 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 				surveyID = survey.SurveyID
 			}
 		} else {
-			// Create new survey
+			// SECURITY: Use trustedConductorID from draft, not from request body
 			survey = models.Survey{
-				Title:             draftContent.BasicInfo.Title,
-				Description:       draftContent.BasicInfo.Description,
-				IsSelfRecruitment: draftContent.BasicInfo.IsSelfRecruitment,
-				ConductorID:       draftContent.BasicInfo.ConductorID,
-				Status:            "PUBLISHED",
-				CreatedAt:         time.Now(),
-				UpdatedAt:         time.Now(),
+				Title:                    draftContent.BasicInfo.Title,
+				Description:              draftContent.BasicInfo.Description,
+				IsSelfRecruitment:        draftContent.BasicInfo.IsSelfRecruitment,
+				ConductorID:              trustedConductorID, // SECURITY: Use trusted ID
+				Status:                   "PUBLISHED",
+				AllowAnonymous:           draftContent.BasicInfo.AllowAnonymous,
+				QuestionDisplayMode:      normalizeDisplayMode(draftContent.BasicInfo.QuestionDisplayMode),
+				IsQuiz:                   draftContent.BasicInfo.IsQuiz,
+				TimeLimitMinutes:         draftContent.BasicInfo.TimeLimitMinutes,
+				PassingScorePercentage:   draftContent.BasicInfo.PassingScorePercentage,
+				ShowCorrectAnswers:       draftContent.BasicInfo.ShowCorrectAnswers,
+				ShuffleQuestions:         draftContent.BasicInfo.ShuffleQuestions,
+				ShuffleOptions:           draftContent.BasicInfo.ShuffleOptions,
+				MaxAttempts:              draftContent.BasicInfo.MaxAttempts,
+				RequiresManualEvaluation: draftContent.BasicInfo.RequiresManualEvaluation,
+				ParticipantFields:        draftContent.BasicInfo.ParticipantFields,
+				CreatedAt:                time.Now(),
+				UpdatedAt:                time.Now(),
 			}
 
 			if err := s.surveyRepo.CreateWithTx(ctx, tx, &survey); err != nil {
@@ -302,8 +380,18 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 		// Create a map to store question objects by ID for later reference
 		questionMap := make(map[uint]models.Question)
 
-		// Add questions
+		// Add questions (skip blank questions with no text)
 		for _, q := range draftContent.Questions {
+			if strings.TrimSpace(q.QuestionText) == "" {
+				log.Printf("Skipping blank question with ID %d (no question text)", q.QuestionID)
+				continue
+			}
+
+			points := q.Points
+			if points == 0 {
+				points = 1
+			}
+
 			question := models.Question{
 				SurveyID:       surveyID,
 				QuestionText:   q.QuestionText,
@@ -311,8 +399,14 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 				Mandatory:      q.Mandatory,
 				BranchingLogic: q.BranchingLogic,
 				CorrectAnswers: q.CorrectAnswers,
-				CreatedAt:      time.Now(),
-				UpdatedAt:      time.Now(),
+				// Quiz-specific fields
+				Points:      points,
+				Explanation: q.Explanation,
+				// Participant justification settings
+				RequiresJustification: q.RequiresJustification,
+				JustificationRequired: q.JustificationRequired,
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
 			}
 
 			if err := s.surveyRepo.CreateQuestionWithTx(ctx, tx, &question); err != nil {
@@ -373,6 +467,12 @@ func (s *surveyService) PublishDraftToSurvey(ctx context.Context, draftID uint) 
 			return 0, err
 		}
 
+		// Also delete the originating draft by ID. For a brand-new survey the draft's survey_id is 0,
+		// so the survey-id sweep above wouldn't catch it — without this the draft lingers on the dashboard.
+		if err := s.surveyDraftRepo.DeleteByIDWithTx(ctx, tx, draft.DraftID); err != nil {
+			return 0, err
+		}
+
 		return surveyID, nil
 	})
 }
@@ -383,4 +483,78 @@ func (s *surveyService) GetLatestDraft(ctx context.Context, surveyID uint) (*mod
 
 func (s *surveyService) ListSurveysByConductor(ctx context.Context, conductorID uint) ([]models.Survey, error) {
 	return s.surveyRepo.List(ctx, conductorID)
+}
+
+func (s *surveyService) ListDraftsByConductor(ctx context.Context, conductorID uint) ([]models.SurveyDraft, error) {
+	return s.surveyDraftRepo.ListByConductor(ctx, conductorID)
+}
+
+func (s *surveyService) DeleteDraft(ctx context.Context, draftID uint, conductorID uint) error {
+	draft, err := s.surveyDraftRepo.GetByID(ctx, draftID)
+	if err != nil {
+		return errors.New("draft not found")
+	}
+	if draft.ConductorID != conductorID {
+		return errors.New("unauthorized: you do not own this draft")
+	}
+	return s.surveyDraftRepo.Delete(ctx, draftID)
+}
+
+func (s *surveyService) DeleteSurvey(ctx context.Context, surveyID uint, conductorID uint) error {
+	survey, err := s.surveyRepo.GetByID(ctx, surveyID)
+	if err != nil {
+		return errors.New("survey not found")
+	}
+
+	if survey.ConductorID != conductorID {
+		return errors.New("unauthorized: you do not own this survey")
+	}
+
+	return s.surveyRepo.Transaction(ctx, func(tx *gorm.DB) error {
+		sid := surveyID
+
+		// Delete in dependency order (children first)
+		tablesToClean := []struct {
+			query string
+			desc  string
+		}{
+			// Answers belong to sessions which belong to survey
+			{`DELETE FROM answers WHERE session_id IN (SELECT session_id FROM survey_sessions WHERE survey_id = ?)`, "answers"},
+			// Participant drafts belong to sessions
+			{`DELETE FROM participant_survey_drafts WHERE session_id IN (SELECT session_id FROM survey_sessions WHERE survey_id = ?)`, "participant drafts"},
+			// Question evaluations belong to sessions
+			{`DELETE FROM question_evaluations WHERE session_id IN (SELECT session_id FROM survey_sessions WHERE survey_id = ?)`, "question evaluations"},
+			// Sessions
+			{`DELETE FROM survey_sessions WHERE survey_id = ?`, "sessions"},
+			// Options belong to questions which belong to survey
+			{`DELETE FROM options WHERE question_id IN (SELECT question_id FROM questions WHERE survey_id = ?)`, "options"},
+			// Media files
+			{`DELETE FROM survey_media_files WHERE survey_id = ?`, "media files"},
+			// Branching rules
+			{`DELETE FROM branching_rules WHERE survey_id = ?`, "branching rules"},
+			// Questions
+			{`DELETE FROM questions WHERE survey_id = ?`, "questions"},
+			// Access controls & logs
+			{`DELETE FROM survey_access_logs WHERE survey_id = ?`, "access logs"},
+			{`DELETE FROM survey_access_controls WHERE survey_id = ?`, "access controls"},
+			// Invitations
+			{`DELETE FROM survey_invitations WHERE survey_id = ?`, "invitations"},
+			// Requirements
+			{`DELETE FROM survey_requirements WHERE survey_id = ?`, "requirements"},
+			// Drafts
+			{`DELETE FROM survey_drafts WHERE survey_id = ?`, "drafts"},
+			// Survey itself
+			{`DELETE FROM surveys WHERE survey_id = ?`, "survey"},
+		}
+
+		for _, t := range tablesToClean {
+			if err := tx.Exec(t.query, sid).Error; err != nil {
+				log.Printf("Error deleting %s for survey %d: %v", t.desc, sid, err)
+				return err
+			}
+		}
+
+		log.Printf("Survey %d and all related data deleted successfully", sid)
+		return nil
+	})
 }

@@ -16,21 +16,21 @@ spec:
         autoscaling.knative.dev/maxScale: "15"                  # Maximum number of pods
         autoscaling.knative.dev/scaleDownDelay: "30s"           # Time to wait before scaling down
         autoscaling.knative.dev/window: "60s"                   # Window for averaging metrics
-        
+
         # Additional annotations for observability
         run.googleapis.com/execution-environment: gen2         # For Google Cloud Run
-        
+
       labels:
         app: participants-management-service
         version: v1
-        
+
     spec:
       # Container configuration
       containers:
       - name: participants-service
         # Application image
         image: rovin123/participants-management-service:v1
-        
+
         # Enhanced security context for Knative
         securityContext:
           allowPrivilegeEscalation: false
@@ -42,7 +42,7 @@ spec:
               - ALL
           seccompProfile:
             type: RuntimeDefault
-        
+
         # Volume mounts for writable directories (due to read-only filesystem)
         volumeMounts:
         - name: tmp-volume
@@ -55,19 +55,19 @@ spec:
           mountPath: /var/tmp/app
         - name: app-logs-volume
           mountPath: /app/logs
-        
+
         # Port configuration - Knative standard
         ports:
         - containerPort: 8080
           protocol: TCP
-          
+
         # Environment variables from ConfigMap and Secret
         envFrom:
           - configMapRef:
               name: participants-service-config
           - secretRef:
               name: participants-service-secrets
-              
+
         # Resource limits and requests for Go service
         resources:
           requests:
@@ -76,7 +76,7 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "1000m"
-            
+
         # Health checks for Knative probes
         livenessProbe:
           httpGet:
@@ -86,7 +86,7 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
-          
+
         readinessProbe:
           httpGet:
             path: /health
@@ -95,7 +95,7 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 2
-          
+
         # Startup probe for slower startup times (database connections)
         startupProbe:
           httpGet:
@@ -105,7 +105,7 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 12
-        
+
       # Volumes for security context with read-only root filesystem
       volumes:
       - name: tmp-volume
@@ -118,7 +118,5 @@ spec:
         emptyDir: {}
       - name: app-logs-volume
         emptyDir: {}
-        
       # Container concurrency for Go service (Fiber handles concurrency well)
       containerConcurrency: 20
-

@@ -21,14 +21,14 @@ spec:
         
       labels:
         app: auth-service
-        version: v1
+        version: v3
         
     spec:
       # Container configuration
       containers:
       - name: auth-service
         # Your application image
-        image: rovin123/auth-service:v1
+        image: rovin123/auth-service:v2
         
         # Security context for enhanced security
         securityContext:

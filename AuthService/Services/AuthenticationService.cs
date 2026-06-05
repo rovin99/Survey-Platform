@@ -22,16 +22,18 @@ namespace AuthService.Services
         private readonly IConfiguration _configuration;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly ILogger<AuthenticationService> _logger;
-        
+        private readonly ILoginLockoutService _lockoutService;
+
     public AuthenticationService(
-        IUserRepository userRepository, 
-        IRoleRepository roleRepository, 
+        IUserRepository userRepository,
+        IRoleRepository roleRepository,
         IRefreshTokenRepository refreshTokenRepository,
         IMagicLinkTokenRepository magicLinkTokenRepository,
         IEmailService emailService,
         IConfiguration configuration,
         IHttpContextAccessor httpContextAccessor,
-        ILogger<AuthenticationService> logger)
+        ILogger<AuthenticationService> logger,
+        ILoginLockoutService lockoutService)
     {
         _userRepository = userRepository;
         _roleRepository = roleRepository;
@@ -41,6 +43,7 @@ namespace AuthService.Services
         _configuration = configuration;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
+        _lockoutService = lockoutService;
     }
 
     public async Task<(User User, string AccessToken, string RefreshToken)> RegisterUserAsync(string username, string email, string password, string roleName)
@@ -105,19 +108,35 @@ namespace AuthService.Services
             throw new ArgumentException("Username and password are required");
         }
 
-        var user = await _userRepository.GetByUsernameAsync(username);
+        // Check if account is locked out
+        if (_lockoutService.IsLockedOut(username, ipAddress))
+        {
+            _logger.LogWarning("Login blocked - Account locked out: {Username}, IP: {IpAddress}", username, ipAddress);
+            throw new Exception("Account is temporarily locked due to too many failed attempts. Please try again later.");
+        }
+
+        // Allow login by email (onboarded students log in with their email) or by username.
+        // An '@' reliably indicates an email since usernames are restricted to [a-zA-Z0-9_].
+        var user = username.Contains('@')
+            ? await _userRepository.GetByEmailAsync(username.Trim().ToLowerInvariant())
+            : await _userRepository.GetByUsernameAsync(username);
         if (user == null)
         {
+            _lockoutService.RecordFailedAttempt(username, ipAddress);
             _logger.LogWarning("Login failed - User not found: {Username}, IP: {IpAddress}", username, ipAddress);
-            throw new Exception("User not found");
+            throw new Exception("Invalid username or password");  // Generic message to prevent enumeration
         }
 
         if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
         {
-            _logger.LogWarning("Login failed - Invalid password for UserId: {UserId}, Username: {Username}, IP: {IpAddress}", 
+            _lockoutService.RecordFailedAttempt(username, ipAddress);
+            _logger.LogWarning("Login failed - Invalid password for UserId: {UserId}, Username: {Username}, IP: {IpAddress}",
                 user.UserId, username, ipAddress);
-            throw new Exception("Invalid password");
+            throw new Exception("Invalid username or password");  // Generic message to prevent enumeration
         }
+
+        // Reset failed attempts on successful login
+        _lockoutService.ResetAttempts(username, ipAddress);
 
         // Revoke all existing refresh tokens for this user
         await _refreshTokenRepository.RevokeAllUserTokensAsync(user.UserId, "New login", ipAddress);
@@ -194,7 +213,7 @@ namespace AuthService.Services
                     ValidateAudience = true,
                     ValidAudience = _configuration["Jwt:Audience"],
                     ValidateLifetime = false, // Don't validate lifetime here
-                    ClockSkew = TimeSpan.Zero
+                    ClockSkew = TimeSpan.FromSeconds(30)
                 };
 
                 var tokenHandler = new JwtSecurityTokenHandler();
@@ -226,10 +245,13 @@ namespace AuthService.Services
         {
             if (_httpContextAccessor.HttpContext != null)
             {
+                // Secure only over HTTPS — in Development (HTTP, e.g. IP-based deployments) the cookie
+                // must NOT be Secure or the browser drops it. Mirrors AuthController's logic.
+                var isDev = string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
                 _httpContextAccessor.HttpContext.Response.Cookies.Delete("refreshToken", new CookieOptions
                 {
                     HttpOnly = true,
-                    Secure = true,
+                    Secure = !isDev,
                     SameSite = SameSiteMode.Strict,
                     Path = "/"
                 });
@@ -257,7 +279,7 @@ namespace AuthService.Services
                 issuer: _configuration["Jwt:Issuer"],
                 audience: _configuration["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.Now.AddMinutes(15), // Short lifetime for access token
+                expires: DateTime.Now.AddMinutes(60), // 1 hour access token
                 signingCredentials: credentials
             );
 
@@ -284,10 +306,11 @@ namespace AuthService.Services
         {
             if (_httpContextAccessor.HttpContext != null)
             {
+                var isDev = string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
                 _httpContextAccessor.HttpContext.Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
                 {
                     HttpOnly = true,
-                    Secure = true,
+                    Secure = !isDev,
                     SameSite = SameSiteMode.Strict,
                     Expires = DateTime.Now.AddDays(7),
                     Path = "/"
@@ -386,7 +409,7 @@ namespace AuthService.Services
                     ValidIssuer = _configuration["Jwt:Issuer"],
                     ValidAudience = _configuration["Jwt:Audience"],
                     ValidateLifetime = true,
-                    ClockSkew = TimeSpan.Zero
+                    ClockSkew = TimeSpan.FromSeconds(30)  // Allow 30s tolerance for clock drift
                 };
 
                 var principal = tokenHandler.ValidateToken(token, validationParameters, out SecurityToken validatedToken);
@@ -430,7 +453,7 @@ namespace AuthService.Services
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddMinutes(int.Parse(_configuration["Jwt:DurationInMinutes"] ?? "15")),
+                Expires = DateTime.UtcNow.AddMinutes(int.Parse(_configuration["Jwt:DurationInMinutes"] ?? "60")),
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
                 Issuer = _configuration["Jwt:Issuer"],
                 Audience = _configuration["Jwt:Audience"]
@@ -485,10 +508,13 @@ namespace AuthService.Services
 
             // Generate unique token
             var token = GenerateRandomToken();
-            var expiresAt = DateTime.UtcNow.AddMinutes(15); // 15-minute expiration
+            var expiresAt = DateTime.UtcNow.AddMinutes(60); // 1 hour expiration
 
             // Check if user exists
             var existingUser = await _userRepository.GetByEmailAsync(email);
+
+            // Invalidate any existing unused tokens for this email (security: only one active token at a time)
+            await _magicLinkTokenRepository.InvalidateAllTokensForEmailAsync(email, "New magic link requested");
 
             // Create magic link token
             var magicLinkToken = new MagicLinkToken
@@ -543,8 +569,7 @@ namespace AuthService.Services
                 throw new ArgumentException("Token is required");
             }
 
-            // Get the stored magic link token
-            _logger.LogInformation("Looking up magic link token: {Token}", token);
+            // Get the stored magic link token (don't log the actual token for security)
             var magicLinkToken = await _magicLinkTokenRepository.GetByTokenAsync(token);
             
             if (magicLinkToken == null)

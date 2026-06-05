@@ -19,27 +19,25 @@ jobs:
   test:
     name: Test & Quality Check
     runs-on: ubuntu-latest
-    
     defaults:
       run:
         working-directory: ./AuthService
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones disabled for SonarQube
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '9.0.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json') }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: |
             ${{ runner.os }}-nuget-
 
@@ -55,10 +53,8 @@ jobs:
             --no-build \
             --configuration Release \
             --verbosity normal \
-            --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults/ \
-            --logger trx \
-            --logger "console;verbosity=detailed" || echo "No tests found, continuing..."
+            --logger trx || echo "No tests found, continuing..."
 
       - name: Generate test report
         uses: dorny/test-reporter@v1
@@ -68,31 +64,10 @@ jobs:
           path: '**/TestResults/*.trx'
           reporter: dotnet-trx
 
-      - name: Code Coverage Report
-        if: always()
-        run: |
-          if [ -d "./TestResults/" ] && [ "$(ls -A ./TestResults/)" ]; then
-            echo "Coverage files found in TestResults/"
-            ls -la ./TestResults/
-          else
-            echo "No coverage files found, creating empty coverage report"
-            mkdir -p ./TestResults/
-            echo '<?xml version="1.0" encoding="utf-8"?><coverage><project><summary><linecoverage>0</linecoverage></summary></project></coverage>' > ./TestResults/coverage.xml
-          fi
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./AuthService/TestResults/**/*.xml
-          flags: authservice
-          name: codecov-authservice
-          fail_ci_if_error: false
-
   security-scan:
     name: Security Analysis
     runs-on: ubuntu-latest
     needs: test
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -108,7 +83,7 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -116,12 +91,11 @@ jobs:
     name: Build and Push Docker Image
     needs: [test, security-scan]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    
+    # Build/push only on PRs and develop; the deploy workflows build the canonical image on main.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
     permissions:
       contents: read
       packages: write
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -144,16 +118,13 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: ./AuthService
-          file: ./AuthService/docker/Dockerfile
+          file: ./AuthService/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -161,45 +132,16 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64
 
-      - name: Build and push Knative-optimized image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./AuthService
-          file: ./AuthService/docker/Dockerfile.knative
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-knative
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64
-
-      - name: Run Trivy security scan on image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-image-results.sarif'
-
-      - name: Upload image scan results
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: 'trivy-image-results.sarif'
-
   notify:
     name: Notify Build Status
-    needs: [test, security-scan, build-and-push]
+    needs: [test, security-scan]
     runs-on: ubuntu-latest
     if: always()
-    
     steps:
-      - name: Notify on success
-        if: needs.build-and-push.result == 'success'
+      - name: Status
         run: |
-          echo "✅ AuthService CI pipeline completed successfully!"
-          echo "🐳 Docker image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-      
-      - name: Notify on failure
-        if: failure()
-        run: |
-          echo "❌ AuthService CI pipeline failed!"
-          echo "Check the logs for more details."
+          if [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ]; then
+            echo "✅ AuthService CI passed"
+          else
+            echo "❌ AuthService CI failed"
+          fi

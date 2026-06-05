@@ -53,7 +53,6 @@ spec:
           mountPath: /tmp/app
         - name: app-var-tmp-volume
           mountPath: /var/tmp/app
-        
         # Port configuration - K-Native standard
         ports:
         - containerPort: 8080
@@ -114,6 +113,5 @@ spec:
         emptyDir: {}
       - name: app-var-tmp-volume
         emptyDir: {}
-        
       # Container concurrency for Go service
       containerConcurrency: 15 

@@ -5,12 +5,16 @@ export const STORAGE_KEYS = {
 } as const;
 
 // API endpoints
-export const API_ENDPOINTS = {
-  BASE_URL: 'http://localhost:3001',
-  DRAFTS: '/api/v1/drafts',
-  MEDIA_UPLOAD: '/api/v1/media/upload',
-  CONDUCTOR_CURRENT: 'http://localhost:5171/api/Conductor/current'
-} as const;
+// DEPRECATED: Use centralized API config from @/lib/api-config instead
+// Import: import { surveyConfig, authConfig } from '@/lib/api-config'
+//
+// Example replacements:
+// - API_ENDPOINTS.BASE_URL -> surveyConfig.baseUrl
+// - API_ENDPOINTS.DRAFTS -> surveyConfig.paths.drafts
+// - API_ENDPOINTS.MEDIA_UPLOAD -> surveyConfig.paths.mediaUpload
+// - API_ENDPOINTS.CONDUCTOR_CURRENT -> authConfig.baseUrl + authConfig.paths.conductorDelete
+//
+// These constants are kept only for reference and will be removed in future versions
 
 // Timing constants
 export const TIMING = {

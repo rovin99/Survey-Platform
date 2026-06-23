@@ -53,12 +53,14 @@ const conductorSchema = z.object({
 
 // Participant registration form schema
 const participantSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters"),
+  phoneNumber: z.string().optional(),
   skills: z.array(
     z.object({
       skillName: z.string(),
       proficiencyLevel: z.number().int().min(1).max(5),
     })
-  ).min(1, "Select at least one skill"),
+  ).optional(),
 });
 
 type ConductorFormValues = z.infer<typeof conductorSchema>;
@@ -75,14 +77,23 @@ export default function RoleSelectionPage() {
     participant: false,
   });
 
+  // Check existing roles
+  const isConductor = user?.roles?.includes("Conducting") || false;
+  const isParticipant = user?.roles?.includes("Participating") || false;
+  const hasBothRoles = isConductor && isParticipant;
+
+  // Auto-fill name from existing user profile
+  const userName = user?.username || "";
+  const userEmail = user?.email || "";
+
   // Conductor form - moved to top to avoid conditional hook calls
   const conductorForm = useForm<ConductorFormValues>({
     resolver: zodResolver(conductorSchema),
     defaultValues: {
-      name: "",
+      name: userName,
       conductorType: 0,
       description: "",
-      contactEmail: "",
+      contactEmail: userEmail,
       contactPhone: "",
       address: "",
     },
@@ -92,16 +103,33 @@ export default function RoleSelectionPage() {
   const participantForm = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema),
     defaultValues: {
+      name: userName,
+      phoneNumber: "",
       skills: [],
     },
   });
 
-  // Redirect if not authenticated
+  // Update form defaults when user data loads
+  useEffect(() => {
+    if (userName) {
+      if (!conductorForm.getValues("name")) conductorForm.setValue("name", userName);
+      if (!participantForm.getValues("name")) participantForm.setValue("name", userName);
+    }
+    if (userEmail && !conductorForm.getValues("contactEmail")) {
+      conductorForm.setValue("contactEmail", userEmail);
+    }
+  }, [userName, userEmail]);
+
+  // Redirect if not authenticated or if user already has both roles
   useEffect(() => {
     if (!loading && !isAuthenticated) {
       router.push('/login');
     }
-  }, [isAuthenticated, loading, router]);
+    // Redirect to dashboard if user already has both roles
+    if (!loading && isAuthenticated && hasBothRoles) {
+      router.push('/dashboard');
+    }
+  }, [isAuthenticated, loading, router, hasBothRoles]);
 
   // Show loading state
   if (loading) {
@@ -150,19 +178,25 @@ export default function RoleSelectionPage() {
 
 
 
-  const onSubmitParticipant = async () => {
+  const onSubmitParticipant = async (data: ParticipantFormValues) => {
     try {
-      const skills = selectedSkills.map(skill => ({
-        skillName: skill.label,
-        proficiencyLevel: skill.proficiency
-      }));
-      
-      await authService.registerParticipant({ skills });
+      const skills = selectedSkills.length > 0
+        ? selectedSkills.map(skill => ({
+            skillName: skill.label,
+            proficiencyLevel: skill.proficiency
+          }))
+        : undefined;
+
+      await authService.registerParticipant({
+        name: data.name,
+        phoneNumber: data.phoneNumber || undefined,
+        skills
+      });
       setRegistrationStatus(prev => ({ ...prev, participant: true }));
-      
+
       // Refresh user data to get updated roles
       await refreshUser();
-      
+
       // Redirect to dashboard for participants
       setTimeout(() => {
         router.push("/dashboard");
@@ -179,16 +213,31 @@ export default function RoleSelectionPage() {
     router.push("/dashboard");
   };
 
+  // Determine default tab (show the one they don't have yet)
+  const defaultTab = isConductor ? "participant" : "conductor";
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center py-10">
       <div className="w-full max-w-3xl px-4">
-        <h1 className="text-2xl font-bold text-center mb-6">Complete Your Registration</h1>
-        <p className="text-center mb-8">Choose your role(s) in the system</p>
+        <h1 className="text-2xl font-bold text-center mb-6">
+          {isConductor || isParticipant ? "Add Another Role" : "Complete Your Registration"}
+        </h1>
+        <p className="text-center mb-8">
+          {isConductor || isParticipant
+            ? "You can register for additional roles to expand your capabilities"
+            : "Choose your role(s) in the system"}
+        </p>
 
-        <Tabs defaultValue="conductor" className="w-full">
+        <Tabs defaultValue={defaultTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-4">
-            <TabsTrigger value="conductor">Register as Conductor</TabsTrigger>
-            <TabsTrigger value="participant">Register as Participant</TabsTrigger>
+            <TabsTrigger value="conductor" className="relative">
+              Register as Conductor
+              {isConductor && <span className="ml-2 text-xs text-green-600">✓</span>}
+            </TabsTrigger>
+            <TabsTrigger value="participant" className="relative">
+              Register as Participant
+              {isParticipant && <span className="ml-2 text-xs text-green-600">✓</span>}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="conductor">
@@ -200,7 +249,18 @@ export default function RoleSelectionPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {registrationStatus.conductor ? (
+                {isConductor ? (
+                  <div className="p-6 text-center">
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <span className="text-3xl text-green-600">✓</span>
+                    </div>
+                    <h3 className="text-lg font-semibold text-green-700 mb-2">Already Registered</h3>
+                    <p className="text-gray-600 mb-4">You are already registered as a conductor.</p>
+                    <Button onClick={() => router.push("/survey/create")} variant="outline">
+                      Go to Create Survey
+                    </Button>
+                  </div>
+                ) : registrationStatus.conductor ? (
                   <div className="p-4 border rounded-md bg-green-50 text-green-600 mb-4">
                     <p className="font-medium">Successfully registered as a conductor!</p>
                     <p className="text-sm mt-2">Redirecting to create survey page...</p>
@@ -346,104 +406,145 @@ export default function RoleSelectionPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {registrationStatus.participant ? (
+                {isParticipant ? (
+                  <div className="p-6 text-center">
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <span className="text-3xl text-green-600">✓</span>
+                    </div>
+                    <h3 className="text-lg font-semibold text-green-700 mb-2">Already Registered</h3>
+                    <p className="text-gray-600 mb-4">You are already registered as a participant.</p>
+                    <Button onClick={() => router.push("/dashboard")} variant="outline">
+                      Go to Dashboard
+                    </Button>
+                  </div>
+                ) : registrationStatus.participant ? (
                   <div className="p-4 border rounded-md bg-green-50 text-green-600 mb-4">
                     <p className="font-medium">Successfully registered as a participant!</p>
                     <p className="text-sm mt-2">Redirecting to dashboard...</p>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="font-medium">Add Your Skills</label>
-                        <div className="flex flex-col gap-4">
-                          <div className="flex flex-wrap gap-2">
-                            {selectedSkills.map((skill) => (
-                              <div 
-                                key={skill.id} 
-                                className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full"
-                              >
-                                <span>{skill.label} (Level: {skill.proficiency})</span>
-                                <button 
-                                  type="button"
-                                  onClick={() => handleRemoveSkill(skill.id)}
-                                  className="text-red-500 hover:text-red-700"
+                  <Form {...participantForm}>
+                    <form onSubmit={participantForm.handleSubmit(onSubmitParticipant)} className="space-y-6">
+                      {/* Name Field - Required */}
+                      <FormField
+                        control={participantForm.control}
+                        name="name"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Full Name <span className="text-red-500">*</span></FormLabel>
+                            <FormControl>
+                              <Input placeholder="Enter your full name" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      {/* Phone Field - Optional */}
+                      <FormField
+                        control={participantForm.control}
+                        name="phoneNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Phone Number <span className="text-gray-500 font-normal">(optional)</span></FormLabel>
+                            <FormControl>
+                              <Input placeholder="+1 (555) 123-4567" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      {/* Skills - Optional */}
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="font-medium">Add Your Skills <span className="text-gray-500 font-normal">(optional)</span></label>
+                          <div className="flex flex-col gap-4">
+                            <div className="flex flex-wrap gap-2">
+                              {selectedSkills.map((skill) => (
+                                <div
+                                  key={skill.id}
+                                  className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full"
                                 >
-                                  ×
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          
-                          <div className="grid grid-cols-3 gap-4 items-center">
-                            <Select value={newSkillId} onValueChange={(value) => setNewSkillId(value)}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select a skill" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {skillsOptions
-                                  .filter(skill => !selectedSkills.some(s => s.id === skill.id))
-                                  .map((skill) => (
-                                    <SelectItem key={skill.id} value={skill.id}>
-                                      {skill.label}
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
+                                  <span>{skill.label} (Level: {skill.proficiency})</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveSkill(skill.id)}
+                                    className="text-red-500 hover:text-red-700"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
 
-                            <Select value={newSkillProficiency} onValueChange={(v) => setNewSkillProficiency(v)}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Proficiency level" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="1">1 - Beginner</SelectItem>
-                                <SelectItem value="2">2 - Elementary</SelectItem>
-                                <SelectItem value="3">3 - Intermediate</SelectItem>
-                                <SelectItem value="4">4 - Advanced</SelectItem>
-                                <SelectItem value="5">5 - Expert</SelectItem>
-                              </SelectContent>
-                            </Select>
+                            <div className="grid grid-cols-3 gap-4 items-center">
+                              <Select value={newSkillId} onValueChange={(value) => setNewSkillId(value)}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select a skill" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {skillsOptions
+                                    .filter(skill => !selectedSkills.some(s => s.id === skill.id))
+                                    .map((skill) => (
+                                      <SelectItem key={skill.id} value={skill.id}>
+                                        {skill.label}
+                                      </SelectItem>
+                                    ))}
+                                </SelectContent>
+                              </Select>
 
-                            <Button
-                              type="button"
-                              onClick={() => {
-                                if (!newSkillId) return;
-                                handleAddSkill(newSkillId, parseInt(newSkillProficiency));
-                                setNewSkillId("");
-                                setNewSkillProficiency("3");
-                              }}
-                              disabled={!newSkillId}
-                            >
-                              Add Skill
-                            </Button>
+                              <Select value={newSkillProficiency} onValueChange={(v) => setNewSkillProficiency(v)}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Proficiency level" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="1">1 - Beginner</SelectItem>
+                                  <SelectItem value="2">2 - Elementary</SelectItem>
+                                  <SelectItem value="3">3 - Intermediate</SelectItem>
+                                  <SelectItem value="4">4 - Advanced</SelectItem>
+                                  <SelectItem value="5">5 - Expert</SelectItem>
+                                </SelectContent>
+                              </Select>
+
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  if (!newSkillId) return;
+                                  handleAddSkill(newSkillId, parseInt(newSkillProficiency));
+                                  setNewSkillId("");
+                                  setNewSkillProficiency("3");
+                                }}
+                                disabled={!newSkillId}
+                              >
+                                Add Skill
+                              </Button>
+                            </div>
                           </div>
+                          <p className="text-gray-500 text-sm">
+                            Skills are optional. You can add them later in your profile.
+                          </p>
                         </div>
                       </div>
-                    </div>
 
-                    {participantForm.formState.errors.root && (
-                      <div className="text-red-500 text-sm">
-                        {participantForm.formState.errors.root.message}
-                      </div>
-                    )}
-                    
-                    {selectedSkills.length === 0 && (
-                      <div className="text-amber-500 text-sm">
-                        Please add at least one skill to continue
-                      </div>
-                    )}
+                      {participantForm.formState.errors.root && (
+                        <div className="text-red-500 text-sm">
+                          {participantForm.formState.errors.root.message}
+                        </div>
+                      )}
 
-                    <Button
-                      className="w-full"
-                      type="button"
-                      disabled={selectedSkills.length === 0 || participantForm.formState.isSubmitting}
-                      onClick={onSubmitParticipant}
-                    >
-                      {participantForm.formState.isSubmitting
-                        ? "Registering..."
-                        : "Register as Participant"}
-                    </Button>
-                  </div>
+                      <Button
+                        className="w-full"
+                        type="submit"
+                        disabled={participantForm.formState.isSubmitting}
+                      >
+                        {participantForm.formState.isSubmitting
+                          ? "Registering..."
+                          : "Register as Participant"}
+                      </Button>
+                    </form>
+                  </Form>
                 )}
               </CardContent>
             </Card>

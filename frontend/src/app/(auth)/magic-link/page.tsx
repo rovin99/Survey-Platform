@@ -10,12 +10,13 @@ import {
 } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
 import { authService } from "@/services/auth.service";
+import { authConfig } from "@/lib/api-config";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
 
-export default function MagicLinkPage() {
+function MagicLinkContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { refreshUser, isAuthenticated, user } = useAuth();
@@ -33,50 +34,24 @@ export default function MagicLinkPage() {
     if (status === 'success' && userId) {
       setStatus('success');
       setMessage("Successfully signed in! Checking authentication...");
-      
+
       // Check if user is authenticated and update context
       const checkAuth = async () => {
         try {
-          // Try to get user data from verify endpoint (this also validates cookies)
-          const verifyUrl = `${process.env.NEXT_PUBLIC_AUTH_API_URL}/verify`;
-          console.log('Calling verify endpoint:', verifyUrl);
-          
-          const response = await fetch(verifyUrl, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' },
-            credentials: 'include',
-          });
-          
-          console.log('Verify response status:', response.status);
-          console.log('Verify response headers:', Object.fromEntries(response.headers.entries()));
-          
-          if (response.ok) {
-            const result = await response.json();
-            console.log('Verify response body:', result);
-            if (result.success && result.data?.user) {
-              // Authenticate user in the context using dummy login call
-              // This will trigger the AuthContext to update properly
-              console.log('User data found, logging in:', result.data.user);
-              await  refreshUser();
-              setMessage("Successfully signed in! Redirecting...");
-            } else {
-              console.log('No user data in response:', result);
-              setStatus('error');
-              setMessage("Authentication failed. Please try again.");
-            }
-          } else {
-            const errorText = await response.text();
-            console.log('Verify request failed with status:', response.status, 'Response:', errorText);
-            setStatus('error');
-            setMessage("Authentication failed. Please try again.");
-          }
+          // Refresh user data in context (this will trigger isAuthenticated check)
+          await refreshUser();
+          setMessage("Successfully signed in! Redirecting...");
+          setStatus('success');
+
+          // The useEffect below will handle the redirect after user state is updated
+          // Don't redirect here - let the useEffect handle it based on roles
         } catch (error) {
           console.error('Auth check failed:', error);
           setStatus('error');
           setMessage("Authentication failed. Please try again.");
         }
       };
-      
+
       checkAuth();
       return;
     }
@@ -93,30 +68,35 @@ export default function MagicLinkPage() {
 
   // Handle redirect after successful authentication
   useEffect(() => {
-    if (isAuthenticated && user && status === 'success') {
+    if (isAuthenticated && user && status === 'success' && !isRedirecting) {
       setIsRedirecting(true);
-      
+
+      // Check for returnUrl parameter first
+      const returnUrl = searchParams.get('returnUrl');
+      if (returnUrl) {
+        console.log('Redirecting to returnUrl from magic link:', returnUrl);
+        router.replace(returnUrl);
+        return;
+      }
+
       // Check if user has only "User" role (needs role selection)
       const hasOnlyUserRole = user.roles.length === 1 && user.roles.includes("User");
-      
+
       if (hasOnlyUserRole) {
-        router.push("/role-selection");
+        router.replace("/role-selection");
       } else if (user.roles.length > 1 || !user.roles.includes("User")) {
-        router.push("/dashboard");
+        router.replace("/dashboard");
       } else {
-        router.push("/role-selection");
+        router.replace("/role-selection");
       }
     }
-  }, [isAuthenticated, user, status, router]);
+  }, [isAuthenticated, user, status, router, searchParams, isRedirecting]);
 
   const verifyMagicLink = async (token: string) => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL}/verify-magic-link`, {
+      const response = await fetch(`${authConfig.baseUrl}/api/auth/verify-magic-link`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ token }),
       });
@@ -205,5 +185,32 @@ export default function MagicLinkPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function MagicLinkPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="w-[400px]">
+          <CardHeader>
+            <CardTitle>Magic Link Verification</CardTitle>
+            <CardDescription>Loading...</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center space-y-4">
+              <div className="flex justify-center">
+                <Loader2 className="h-12 w-12 text-blue-600 animate-spin" />
+              </div>
+              <p className="text-sm text-gray-600">
+                Preparing verification...
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    }>
+      <MagicLinkContent />
+    </Suspense>
   );
 }

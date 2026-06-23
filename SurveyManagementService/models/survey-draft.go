@@ -61,6 +61,7 @@ func (j *JSONContent) UnmarshalJSON(data []byte) error {
 type SurveyDraft struct {
 	DraftID            uint        `json:"id" gorm:"primaryKey"`
 	SurveyID           uint        `json:"survey_id"`
+	ConductorID        uint        `json:"conductor_id" gorm:"index"` // For access control - which conductor owns this draft
 	DraftContent       JSONContent `json:"draft_content" gorm:"type:jsonb"` // Use jsonb type after migration
 	LastEditedQuestion uint        `json:"last_edited_question"`
 	LastSaved          time.Time   `json:"last_saved"`

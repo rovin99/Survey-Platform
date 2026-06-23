@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 using AuthService.Services;
 using AuthService.Models;
 using AuthService.Utils;
@@ -34,6 +36,36 @@ namespace AuthService.Controllers
             return StatusCode(response.StatusCode, response);
         }
 
+        // Conductor-only: bulk-create student participant accounts (email + shared default password).
+        [HttpPost("bulk-onboard")]
+        [Authorize(Roles = "Conducting")]
+        public async Task<IActionResult> BulkOnboard([FromBody] BulkOnboardRequest request)
+        {
+            if (request == null)
+                return BadRequest(ResponseUtil.BadRequest<object>("Request body is required"));
+
+            // Prefer rich student rows; also accept a plain email list (back-compat) by wrapping
+            // each bare email as an email-only student row.
+            var students = (request.Students ?? new List<BulkOnboardStudent>()).ToList();
+            if (request.Emails != null)
+            {
+                foreach (var email in request.Emails)
+                    students.Add(new BulkOnboardStudent { Email = email });
+            }
+
+            var response = await _participantService.BulkOnboardAsync(request.DefaultPassword, students);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // Conductor-only: roster of all student participant accounts (name, email, roll no, phone, status).
+        [HttpGet("students")]
+        [Authorize(Roles = "Conducting,Admin")]
+        public async Task<IActionResult> ListStudents()
+        {
+            var response = await _participantService.ListStudentsAsync();
+            return StatusCode(response.StatusCode, response);
+        }
+
         [HttpGet("~/api/Participant/current")]
         public async Task<IActionResult> GetCurrentParticipant()
         {
@@ -46,6 +78,31 @@ namespace AuthService.Controllers
                 return NotFound(ResponseUtil.NotFound<object>("Participant profile not found for current user"));
 
             return Ok(participant);
+        }
+
+        [HttpGet("profile")]
+        public async Task<IActionResult> GetProfile()
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+                return BadRequest(ResponseUtil.BadRequest<object>("User ID not found in token"));
+
+            var response = await _participantService.GetProfileByUserIdAsync(userId);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPut("profile")]
+        public async Task<IActionResult> UpdateProfile([FromBody] ParticipantProfileUpdateRequest request)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+                return BadRequest(ResponseUtil.BadRequest<object>("User ID not found in token"));
+
+            var response = await _participantService.UpdateProfileAsync(userId, request);
+            return StatusCode(response.StatusCode, response);
         }
 
         [HttpGet("{id:int}")]

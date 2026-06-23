@@ -29,7 +29,7 @@ spec:
       containers:
       - name: survey-service
         # Updated application image
-        image: rovin123/survey-management-service:v2
+        image: rovin123/survey-management-service:v1
         
         # Enhanced security context for K-Native
         securityContext:
@@ -53,7 +53,6 @@ spec:
           mountPath: /tmp/app
         - name: app-var-tmp-volume
           mountPath: /var/tmp/app
-        
         # Port configuration - K-Native standard
         ports:
         - containerPort: 8080
@@ -114,6 +113,5 @@ spec:
         emptyDir: {}
       - name: app-var-tmp-volume
         emptyDir: {}
-        
       # Container concurrency for Go service
       containerConcurrency: 15 

@@ -49,7 +49,7 @@ func (r *surveyRepository) Create(ctx context.Context, survey *models.Survey) er
 
 func (r *surveyRepository) GetByID(ctx context.Context, id uint) (*models.Survey, error) {
 	var survey models.Survey
-	err := r.db.WithContext(ctx).Preload("Questions").First(&survey, id).Error
+	err := r.db.WithContext(ctx).Preload("Questions.Options").Preload("Questions.MediaFiles").Preload("Questions").First(&survey, id).Error
 	return &survey, err
 }
 
@@ -79,7 +79,7 @@ func (r *surveyRepository) TransactionWithResult(ctx context.Context, fn func(tx
 
 func (r *surveyRepository) GetByIDWithTx(ctx context.Context, tx *gorm.DB, id uint) (*models.Survey, error) {
 	var survey models.Survey
-	err := tx.WithContext(ctx).Preload("Questions").First(&survey, id).Error
+	err := tx.WithContext(ctx).Preload("Questions.Options").Preload("Questions.MediaFiles").Preload("Questions").First(&survey, id).Error
 	return &survey, err
 }
 

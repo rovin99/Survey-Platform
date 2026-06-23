@@ -1,0 +1,89 @@
+# Dependabot configuration for automated dependency updates
+version: 2
+updates:
+  # .NET dependencies (AuthService)
+  - package-ecosystem: "nuget"
+    directory: "/AuthService"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "rovin99"
+    assignees:
+      - "rovin99"
+    labels:
+      - "dependencies"
+      - "authservice"
+    commit-message:
+      prefix: "chore(auth)"
+      include: "scope"
+
+  # Go dependencies (SurveyManagementService)
+  - package-ecosystem: "gomod"
+    directory: "/SurveyManagementService"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "rovin99"
+    assignees:
+      - "rovin99"
+    labels:
+      - "dependencies"
+      - "survey-service"
+    commit-message:
+      prefix: "chore(survey)"
+      include: "scope"
+
+  # Go dependencies (ParticipantsManagementService)
+  - package-ecosystem: "gomod"
+    directory: "/ParticipantsManagementService"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "rovin99"
+    assignees:
+      - "rovin99"
+    labels:
+      - "dependencies"
+      - "participant-service"
+    commit-message:
+      prefix: "chore(participant)"
+      include: "scope"
+
+  # Node.js dependencies (Frontend)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "rovin99"
+    assignees:
+      - "rovin99"
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "chore(frontend)"
+      include: "scope"
+    versioning-strategy: increase
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "rovin99"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"

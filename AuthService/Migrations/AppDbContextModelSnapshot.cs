@@ -136,6 +136,9 @@ namespace AuthService.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("CustomFields")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("ExperienceLevel")
                         .IsRequired()
                         .HasColumnType("text");
@@ -143,8 +146,16 @@ namespace AuthService.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<decimal>("Rating")
                         .HasColumnType("numeric");
+
+                    b.Property<string>("RollNo")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");

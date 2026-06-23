@@ -2,9 +2,10 @@ package handler
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Middlewares"
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/service"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Service"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Utils/response"
 )
 
 type QuestionHandler struct {
@@ -31,6 +32,15 @@ func (h *QuestionHandler) CreateQuestion(c *fiber.Ctx) error {
 	var req CreateQuestionRequest
 	if err := c.BodyParser(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body")
+	}
+
+	// SECURITY: Verify the authenticated user owns the survey they're adding questions to
+	conductorID, err := h.questionService.GetSurveyConductorID(c.Context(), req.SurveyID)
+	if err != nil {
+		return response.NotFound(c, "Survey not found")
+	}
+	if ownershipErr := middlewares.VerifyOwnership(c, conductorID, "survey"); ownershipErr != nil {
+		return ownershipErr
 	}
 
 	// Create a new question model from the request
@@ -67,7 +77,16 @@ func (h *QuestionHandler) GetQuestion(c *fiber.Ctx) error {
 
 	question, err := h.questionService.GetQuestionByID(c.Context(), uint(questionID))
 	if err != nil {
-		return response.InternalServerError(c, "Failed to get question: "+err.Error())
+		return response.NotFound(c, "Question not found")
+	}
+
+	// SECURITY: Verify the authenticated user owns the survey containing this question
+	conductorID, err := h.questionService.GetSurveyConductorID(c.Context(), question.SurveyID)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to verify ownership")
+	}
+	if ownershipErr := middlewares.VerifyOwnership(c, conductorID, "survey"); ownershipErr != nil {
+		return ownershipErr
 	}
 
 	return response.Success(c, question, "Question retrieved successfully")
@@ -77,6 +96,15 @@ func (h *QuestionHandler) GetQuestionsBySurvey(c *fiber.Ctx) error {
 	surveyID, err := c.ParamsInt("survey_id")
 	if err != nil {
 		return response.BadRequest(c, "Invalid survey ID")
+	}
+
+	// SECURITY: Verify the authenticated user owns the survey
+	conductorID, err := h.questionService.GetSurveyConductorID(c.Context(), uint(surveyID))
+	if err != nil {
+		return response.NotFound(c, "Survey not found")
+	}
+	if ownershipErr := middlewares.VerifyOwnership(c, conductorID, "survey"); ownershipErr != nil {
+		return ownershipErr
 	}
 
 	questions, err := h.questionService.GetQuestionsBySurveyID(c.Context(), uint(surveyID))
@@ -93,9 +121,35 @@ func (h *QuestionHandler) UpdateQuestion(c *fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid question ID")
 	}
 
+	// First get the existing question to verify ownership
+	existingQuestion, err := h.questionService.GetQuestionByID(c.Context(), uint(questionID))
+	if err != nil {
+		return response.NotFound(c, "Question not found")
+	}
+
+	// SECURITY: Verify the authenticated user owns the survey containing this question
+	conductorID, err := h.questionService.GetSurveyConductorID(c.Context(), existingQuestion.SurveyID)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to verify ownership")
+	}
+	if ownershipErr := middlewares.VerifyOwnership(c, conductorID, "survey"); ownershipErr != nil {
+		return ownershipErr
+	}
+
 	var req CreateQuestionRequest
 	if err := c.BodyParser(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body")
+	}
+
+	// SECURITY: Prevent moving question to a different survey user doesn't own
+	if req.SurveyID != existingQuestion.SurveyID {
+		targetConductorID, err := h.questionService.GetSurveyConductorID(c.Context(), req.SurveyID)
+		if err != nil {
+			return response.NotFound(c, "Target survey not found")
+		}
+		if ownershipErr := middlewares.VerifyOwnership(c, targetConductorID, "survey"); ownershipErr != nil {
+			return ownershipErr
+		}
 	}
 
 	question := &models.Question{
@@ -119,6 +173,21 @@ func (h *QuestionHandler) DeleteQuestion(c *fiber.Ctx) error {
 	questionID, err := c.ParamsInt("id")
 	if err != nil {
 		return response.BadRequest(c, "Invalid question ID")
+	}
+
+	// First get the existing question to verify ownership
+	existingQuestion, err := h.questionService.GetQuestionByID(c.Context(), uint(questionID))
+	if err != nil {
+		return response.NotFound(c, "Question not found")
+	}
+
+	// SECURITY: Verify the authenticated user owns the survey containing this question
+	conductorID, err := h.questionService.GetSurveyConductorID(c.Context(), existingQuestion.SurveyID)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to verify ownership")
+	}
+	if ownershipErr := middlewares.VerifyOwnership(c, conductorID, "survey"); ownershipErr != nil {
+		return ownershipErr
 	}
 
 	if err := h.questionService.DeleteQuestion(c.Context(), uint(questionID)); err != nil {

@@ -1,0 +1,90 @@
+# Piston Code Execution Engine for Survey Platform
+# Sandboxed environment for running participant code (50+ languages)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: piston
+  namespace: default
+  labels:
+    app: piston
+    component: code-execution
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: piston
+  template:
+    metadata:
+      labels:
+        app: piston
+        component: code-execution
+    spec:
+      containers:
+      - name: piston
+        image: ghcr.io/engineer-man/piston
+        ports:
+        - containerPort: 2000
+          name: api
+          protocol: TCP
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: piston-data
+          mountPath: /piston
+        - name: piston-jobs
+          mountPath: /piston/jobs
+        - name: piston-tmp
+          mountPath: /tmp
+        livenessProbe:
+          httpGet:
+            path: /api/v2/runtimes
+            port: 2000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/v2/runtimes
+            port: 2000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 2
+        securityContext:
+          privileged: true  # Required for Piston sandboxing
+      volumes:
+      - name: piston-data
+        emptyDir: {}
+      - name: piston-jobs
+        emptyDir:
+          medium: Memory
+          sizeLimit: 256Mi
+      - name: piston-tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 128Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: piston
+  namespace: default
+  labels:
+    app: piston
+spec:
+  type: ClusterIP
+  ports:
+  - port: 2000
+    targetPort: 2000
+    protocol: TCP
+    name: api
+  selector:
+    app: piston

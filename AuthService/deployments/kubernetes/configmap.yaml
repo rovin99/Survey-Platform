@@ -2,8 +2,31 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: auth-service-config
+  namespace: default
+  labels:
+    app: auth-service
 data:
-  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_ENVIRONMENT: "Development"
+  # Override Dockerfile default (5000) to match Knative standard port
+  ASPNETCORE_URLS: "http://+:8080"
+
+  # JWT Configuration (non-sensitive parts — secret key is in secrets.template.yaml)
   JWT_ISSUER: "AuthService"
   JWT_AUDIENCE: "SurveyApp"
   JWT_DURATION: "60"
+
+  # Public URL for magic links and email links
+  # Replace with your actual production domain
+  APP_BASE_URL: "https://your-production-domain.com"
+  FRONTEND_URL: "https://your-production-domain.com"
+
+  # Email Service Configuration (uses SurveyManagementService for sending)
+  EmailService__UseExternalService: "true"
+  EmailService__BaseUrl: "http://survey-management-service.default.svc.cluster.local/api"
+  EmailService__TimeoutSeconds: "30"
+
+  # Survey Service Configuration (for SurveyProxy)
+  SurveyService__BaseUrl: "http://survey-management-service.default.svc.cluster.local"
+
+  # CORS allowed origins (replace with your production domain)
+  CORS_ORIGINS: "https://your-production-domain.com"

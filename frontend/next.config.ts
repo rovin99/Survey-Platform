@@ -1,5 +1,44 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+import type { NextConfig } from 'next';
+
+// Get API URLs from environment variables for CSP
+const getApiUrls = () => {
+	const urls = [
+		'self',
+		// Local development URLs
+		'http://localhost:3000',  // Next.js dev server
+		'ws://localhost:3000',    // Next.js HMR WebSocket
+		'http://localhost:5171',
+		'http://localhost:5172',
+		'http://localhost:3001',
+		'http://localhost:8080',
+		'ws://localhost:3001',
+	];
+	
+	// Add environment-based API URLs (configured per deployment)
+	if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+		urls.push(process.env.NEXT_PUBLIC_API_BASE_URL);
+	}
+	if (process.env.NEXT_PUBLIC_AUTH_SERVICE_URL) {
+		urls.push(process.env.NEXT_PUBLIC_AUTH_SERVICE_URL);
+	}
+	if (process.env.NEXT_PUBLIC_SURVEY_SERVICE_URL) {
+		urls.push(process.env.NEXT_PUBLIC_SURVEY_SERVICE_URL);
+	}
+	if (process.env.NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL) {
+		urls.push(process.env.NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL);
+	}
+	// Additional origins from environment (comma-separated)
+	if (process.env.NEXT_PUBLIC_CSP_CONNECT_SRC) {
+		urls.push(...process.env.NEXT_PUBLIC_CSP_CONNECT_SRC.split(',').map(u => u.trim()));
+	}
+	
+	// Remove duplicates
+	return [...new Set(urls)].join(' ');
+};
+
+const nextConfig: NextConfig = {
+	// Enable standalone output for Docker
+	output: 'standalone',
 	eslint: {
 		ignoreDuringBuilds: true, // Ignore ESLint warnings during build
 	},
@@ -7,12 +46,14 @@ const nextConfig = {
 		ignoreBuildErrors: true, // Ignore TypeScript errors during build
 	},
 	async headers() {
+		const connectSrc = getApiUrls();
+		
 		return [
 			{
 				// Apply these headers to all routes
 				source: "/:path*",
 				headers: [
-					{ key: "Access-Control-Allow-Credentials", value: "true" },
+					// Note: CORS headers (Access-Control-*) are set by the backend, not here
 					{
 						key: "X-Frame-Options",
 						value: "DENY",
@@ -35,7 +76,7 @@ const nextConfig = {
 					},
 					{
 						key: "Content-Security-Policy",
-						value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:5171 http://localhost:5172 http://localhost:3001 ws://localhost:3001; frame-ancestors 'none'; base-uri 'self'; form-action 'self';",
+						value: `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src ${connectSrc}; frame-ancestors 'none'; base-uri 'self'; form-action 'self';`,
 					},
 					{
 						key: "Strict-Transport-Security",
@@ -84,4 +125,4 @@ const nextConfig = {
 	},
 };
 
-module.exports = nextConfig;
+export default nextConfig;

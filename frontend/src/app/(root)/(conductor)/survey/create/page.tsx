@@ -2,6 +2,7 @@
 
 "use client";
 
+import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,21 +17,46 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { CheckedState } from "@radix-ui/react-checkbox";
-import { Loader2, Save, X, Upload, FileImage } from "lucide-react";
+import { Loader2, Save, X, Upload, FileImage, Plus, Trash2, User, Mail, Hash, Phone } from "lucide-react";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { debounce } from 'perfect-debounce';
 import { useAuth } from "@/context/AuthContext";
+import { QuizTemplateUploader } from "@/components/survey/QuizTemplateUploader";
+import { CodeQuestionEditor } from "@/components/survey/CodeQuestionEditor";
+import { surveyApi } from "@/services/surveyApi";
+import { authConfig, surveyConfig } from '@/lib/api-config';
+
+// Code test case type
+interface CodeTestCase {
+    id: string;
+    input: string;
+    expectedOutput: string;
+    hidden: boolean;
+}
+
+// Code settings for code questions
+interface CodeSettings {
+    defaultLanguage: string;
+    allowedLanguages: string[];
+    testCases: CodeTestCase[];
+    starterCode: Record<string, string>;
+}
 
 // Type definitions
 interface Question {
     id: string;
     text: string;
-    type: "multiple-choice" | "single-choice" | "text" | "rating";
+    type: "multiple-choice" | "single-choice" | "text" | "rating" | "code" | "image-upload";
     options: Option[];
     mandatory: boolean;
     correctAnswers?: string;
+    points?: number;
+    explanation?: string;
+    requiresJustification?: boolean;
+    justificationRequired?: boolean;
+    codeSettings?: CodeSettings;
     mediaFiles?: Array<{
         id: string;
         url: string;
@@ -44,14 +70,26 @@ interface Option {
     text: string;
 }
 
+// Custom participant field definition
+interface ParticipantField {
+    id: string;
+    label: string;
+    type: 'text' | 'email' | 'number' | 'tel';
+    required: boolean;
+    placeholder?: string;
+}
+
 interface DraftQuestion {
     question_id: number;
     tempId?: string;
     question_text: string;
     question_type: string;
     mandatory: boolean;
-    branching_logic: string;
     correct_answers?: string;
+    points?: number;
+    explanation?: string;
+    requires_justification?: boolean;
+    justification_required?: boolean;
     mediaFiles?: Array<{
         mediaId: number;
         fileUrl: string;
@@ -77,6 +115,17 @@ interface SurveyDraft {
             is_self_recruitment: boolean;
             conductor_id: number;
             status: string;
+            question_display_mode?: 'one_by_one' | 'all_at_once';
+            is_quiz?: boolean;
+            time_limit_minutes?: number;
+            passing_score_percentage?: number;
+            show_correct_answers?: boolean;
+            shuffle_questions?: boolean;
+            shuffle_options?: boolean;
+            max_attempts?: number; // Max times a participant can take this quiz (null = unlimited)
+            requires_manual_evaluation?: boolean; // If true, conductor must manually grade submissions
+            allow_anonymous?: boolean; // If true, participants don't need to register
+            participant_fields?: ParticipantField[]; // Custom fields to collect from participants
         };
         questions: Array<DraftQuestion>;
         options: Array<DraftOption>;
@@ -92,8 +141,11 @@ interface ParsedDraftQuestion {
     question_text: string;
     question_type: string;
     mandatory: boolean;
-    branching_logic: string;
     correct_answers?: string;
+    points?: number;
+    explanation?: string;
+    requires_justification?: boolean;
+    justification_required?: boolean;
     options?: string[];
     mediaFiles?: Array<{
         mediaId: number;
@@ -123,20 +175,35 @@ interface ServerResponse {
 
 const STORAGE_KEY = 'currentSurveyDraft';
 const BACKUP_KEY = `${STORAGE_KEY}-backup`;
-const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL?.replace('/api/auth', '') || 'http://localhost:5171'; // Auth service base URL
+
+// Direct service URLs - no proxies
+const AUTH_URL = authConfig.baseUrl;
+const SURVEY_URL = surveyConfig.baseUrl;
 
 // Type for window with requestIdleCallback support
 type WindowWithIdleCallback = Window & {
     requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
 };
 
-export default function SurveyCreatePage() {
+export default function SurveyCreatePageWrapper() {
+    return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p>Loading...</p></div>}>
+            <SurveyCreatePage />
+        </Suspense>
+    );
+}
+
+function SurveyCreatePage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { user, isAuthenticated, loading } = useAuth();
-    
+    const editSurveyId = searchParams.get("editSurveyId");
+    const draftIdParam = searchParams.get("draftId");
+    const isNewSurvey = searchParams.get("new") === "true";
+
     const [isLoading, setIsLoading] = useState(false);
     const [questions, setQuestions] = useState<Question[]>([]);
-    const [currentSection, setCurrentSection] = useState<'basic' | 'questions' | 'branching'>('basic');
+    const [currentSection, setCurrentSection] = useState<'basic' | 'questions' | 'publish'>('basic');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [lastSynced, setLastSynced] = useState<Date | null>(null);
     const [conductorInfo, setConductorInfo] = useState<{ conductorId: number } | null>(null);
@@ -149,7 +216,18 @@ export default function SurveyCreatePage() {
                 description: '',
                 is_self_recruitment: false,
                 status: 'DRAFT',
-                conductor_id: 0 // Will be set after loading conductor info
+                conductor_id: 0, // Will be set after loading conductor info
+                question_display_mode: 'one_by_one',
+                is_quiz: false,
+                time_limit_minutes: undefined,
+                passing_score_percentage: undefined,
+                allow_anonymous: false, // Default: require registration
+                show_correct_answers: true,
+                shuffle_questions: false,
+                shuffle_options: false,
+                max_attempts: undefined, // Unlimited by default
+                requires_manual_evaluation: false, // Auto-evaluate by default
+                participant_fields: [] // Custom fields to collect from participants
             },
             questions: [],
             options: []
@@ -161,6 +239,9 @@ export default function SurveyCreatePage() {
     const isSyncingRef = useRef(false);
     // Track the latest draft that needs to be synced
     const pendingDraftRef = useRef<SurveyDraft | null>(null);
+    // Always keep a ref to the latest draft state (avoids stale closures in async handlers)
+    const draftRef = useRef(draft);
+    useEffect(() => { draftRef.current = draft; }, [draft]);
 
     // Utility function to save to localStorage without triggering sync
     const saveToLocalStorage = (draftToSave: SurveyDraft, key = STORAGE_KEY) => {
@@ -240,15 +321,15 @@ export default function SurveyCreatePage() {
             validDraftId = draftData.draftId;
         }
         
-        // Create a question ID mapping for normalization
+        // Create a question ID mapping for normalization (only non-blank questions)
         const questionIdMap = new Map<number, number>();
-        
-        // Assign sequential IDs to questions
-        draftData.draftContent.questions.forEach((question, index) => {
+        let normalizedIdx = 1;
+        draftData.draftContent.questions.forEach((question) => {
+            if ((question.question_text || "").trim() === "") return;
             const originalId = question.question_id;
-            const normalizedId = index + 1; // Start with 1
             if (originalId !== undefined) {
-                questionIdMap.set(originalId, normalizedId);
+                questionIdMap.set(originalId, normalizedIdx);
+                normalizedIdx++;
             }
         });
         
@@ -259,27 +340,49 @@ export default function SurveyCreatePage() {
                 description: draftData.draftContent.basicInfo.description,
                 is_self_recruitment: draftData.draftContent.basicInfo.is_self_recruitment,
                 status: draftData.draftContent.basicInfo.status,
-                conductor_id: draftData.draftContent.basicInfo.conductor_id
+                conductor_id: draftData.draftContent.basicInfo.conductor_id,
+                question_display_mode: draftData.draftContent.basicInfo.question_display_mode || 'one_by_one',
+                // Distribution settings
+                allow_anonymous: draftData.draftContent.basicInfo.allow_anonymous || false,
+                // Quiz-specific fields
+                is_quiz: draftData.draftContent.basicInfo.is_quiz || false,
+                time_limit_minutes: draftData.draftContent.basicInfo.time_limit_minutes,
+                passing_score_percentage: draftData.draftContent.basicInfo.passing_score_percentage,
+                show_correct_answers: draftData.draftContent.basicInfo.show_correct_answers,
+                shuffle_questions: draftData.draftContent.basicInfo.shuffle_questions,
+                shuffle_options: draftData.draftContent.basicInfo.shuffle_options,
+                max_attempts: draftData.draftContent.basicInfo.max_attempts,
+                // Custom participant fields
+                participant_fields: draftData.draftContent.basicInfo.participant_fields || []
             },
-            questions: draftData.draftContent.questions.map((q, index) => ({
-                question_id: index + 1, // Use normalized ID
-                question_text: q.question_text,
-                question_type: q.question_type,
-                mandatory: q.mandatory,
-                branching_logic: q.branching_logic,
-                correct_answers: q.correct_answers || ""
-            })),
-            options: draftData.draftContent.options.map(opt => ({
-                option_text: opt.option_text,
-                question_id: questionIdMap.get(opt.question_id) || 1 // Use normalized question ID
-            })),
-            mediaFiles: draftData.draftContent.questions.flatMap(q => 
-                (q.mediaFiles || []).map(m => ({
-                    question_id: questionIdMap.get(q.question_id) || 1, // Use normalized question ID
-                    file_url: m.fileUrl,
-                    file_type: m.fileType
-                }))
-            )
+            questions: draftData.draftContent.questions
+                .filter(q => (q.question_text || "").trim() !== "")
+                .map((q, index) => ({
+                    question_id: index + 1,
+                    question_text: q.question_text,
+                    question_type: q.question_type,
+                    mandatory: q.mandatory,
+                    correct_answers: q.correct_answers || "",
+                    points: q.points || 1,
+                    explanation: q.explanation || "",
+                    requires_justification: q.requires_justification || false,
+                    justification_required: q.justification_required || false
+                })),
+            options: draftData.draftContent.options
+                .filter(opt => questionIdMap.has(opt.question_id))
+                .map(opt => ({
+                    option_text: opt.option_text,
+                    question_id: questionIdMap.get(opt.question_id) || 1
+                })),
+            mediaFiles: draftData.draftContent.questions
+                .filter(q => (q.question_text || "").trim() !== "")
+                .flatMap(q => 
+                    (q.mediaFiles || []).map(m => ({
+                        question_id: questionIdMap.get(q.question_id) || 1,
+                        file_url: m.fileUrl,
+                        file_type: m.fileType
+                    }))
+                )
         };
 
         // Log normalized mappings for debugging
@@ -289,13 +392,14 @@ export default function SurveyCreatePage() {
         try {
             // Verify if the draft actually exists on the backend before deciding on PUT vs POST
             let method = 'POST';
-            let endpoint = `${API_BASE_URL}/api/SurveyProxy/drafts`;
+            let endpoint = `${SURVEY_URL}/api/v1/drafts`;
             
             // Only use PUT if we have a valid draft ID that was previously saved
             if (validDraftId) {
                 try {
                     // First try with HEAD request (lightweight)
-                    let checkResponse = await fetch(`${API_BASE_URL}/api/SurveyProxy/drafts/${validDraftId}`, {
+                    // Auth is handled automatically via HTTP-only cookies
+                    let checkResponse = await fetch(`${SURVEY_URL}/api/v1/drafts/${validDraftId}`, {
                         method: 'HEAD',
                         credentials: 'include'
                     });
@@ -303,7 +407,7 @@ export default function SurveyCreatePage() {
                     // If HEAD method is not supported, fall back to GET
                     if (checkResponse.status === 405) { // Method Not Allowed
                         console.log('HEAD method not supported, falling back to GET');
-                        checkResponse = await fetch(`${API_BASE_URL}/api/SurveyProxy/drafts/${validDraftId}`, {
+                        checkResponse = await fetch(`${SURVEY_URL}/api/v1/drafts/${validDraftId}`, {
                             method: 'GET',
                             credentials: 'include'
                         });
@@ -311,7 +415,7 @@ export default function SurveyCreatePage() {
                     
                     if (checkResponse.ok) {
                         method = 'PUT';
-                        endpoint = `${API_BASE_URL}/api/SurveyProxy/drafts/${validDraftId}`;
+                        endpoint = `${SURVEY_URL}/api/v1/drafts/${validDraftId}`;
                         console.log(`Draft with ID ${validDraftId} exists, using PUT method`);
                     } else {
                         console.log(`Draft with ID ${validDraftId} does not exist (status: ${checkResponse.status}), using POST method`);
@@ -332,15 +436,16 @@ export default function SurveyCreatePage() {
             console.log('Draft data being sent:', JSON.stringify(transformedContent, null, 2));
             
             const requestBody = {
-                survey_id: 0, // 0 indicates this is a new survey, not editing an existing one
+                survey_id: draftData.surveyId || 0, // 0 = new survey, >0 = updating existing
                 draft_content: transformedContent,
                 last_edited_question: draftData.lastEditedQuestion ? parseInt(draftData.lastEditedQuestion) : 0,
                 draft_id: validDraftId || undefined // Initialize with value or undefined
             };
             
+            // Auth token is in HTTP-only cookie, sent automatically with credentials: 'include'
             const headers: Record<string, string> = { 
                 'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                'Accept': 'application/json',
             };
             
             console.log('Request headers:', headers);
@@ -464,18 +569,17 @@ export default function SurveyCreatePage() {
                 try {
                     const retryMethod = draftData.draftId ? 'PUT' : 'POST';
                     const retryEndpoint = draftData.draftId 
-                        ? `${API_BASE_URL}/api/SurveyProxy/drafts/${draftData.draftId}`
-                        : `${API_BASE_URL}/api/SurveyProxy/drafts`;
+                        ? `${SURVEY_URL}/api/v1/drafts/${draftData.draftId}`
+                        : `${SURVEY_URL}/api/v1/drafts`;
                         
                     const retryResponse = await fetch(retryEndpoint, {
                         method: retryMethod,
                         headers: {
                             'Content-Type': 'application/json',
-                            'Accept': 'application/json'
                         },
                         credentials: 'include',
                         body: JSON.stringify({
-                            survey_id: 0, // 0 indicates this is a new survey
+                            survey_id: draftData.surveyId || 0, // 0 = new survey, >0 = updating existing
                             draft_content: transformedContent,
                             last_edited_question: draftData.lastEditedQuestion ? parseInt(draftData.lastEditedQuestion) : 0
                         })
@@ -593,8 +697,223 @@ export default function SurveyCreatePage() {
         return () => clearInterval(interval);
     }, [draft]);
 
-    // Load draft from localStorage on mount
+    // Load published survey for editing (if ?editSurveyId= is present)
     useEffect(() => {
+        if (!editSurveyId) return;
+
+        const loadSurveyForEditing = async () => {
+            try {
+                setIsLoading(true);
+                const survey = await surveyApi.getSurvey(parseInt(editSurveyId));
+                console.log("Loading published survey for editing:", survey);
+
+                // Convert survey → draft format
+                const draftQuestions: DraftQuestion[] = (survey.questions || []).map((q: any, idx: number) => ({
+                    question_id: idx + 1,
+                    question_text: q.question_text,
+                    question_type: q.question_type,
+                    mandatory: q.mandatory,
+                    correct_answers: q.correct_answers || "",
+                    points: q.points,
+                    explanation: q.explanation,
+                    requires_justification: q.requires_justification || false,
+                    justification_required: q.justification_required || false,
+                }));
+
+                const draftOptions: DraftOption[] = (survey.questions || []).flatMap((q: any, qIdx: number) =>
+                    (q.options || []).map((opt: any, optIdx: number) => ({
+                        optionId: `${qIdx + 1}-opt-${optIdx}`,
+                        question_id: qIdx + 1,
+                        option_text: opt.option_text,
+                    }))
+                );
+
+                const editDraft: SurveyDraft = {
+                    surveyId: survey.id, // Critical: tells backend to UPDATE not CREATE
+                    draftContent: {
+                        basicInfo: {
+                            title: survey.title,
+                            description: survey.description,
+                            is_self_recruitment: survey.is_self_recruitment,
+                            conductor_id: survey.conductor_id,
+                            status: survey.status,
+                            question_display_mode: survey.question_display_mode || 'one_by_one',
+                            is_quiz: survey.is_quiz,
+                            time_limit_minutes: survey.time_limit_minutes,
+                            passing_score_percentage: survey.passing_score_percentage,
+                            show_correct_answers: survey.show_correct_answers,
+                            shuffle_questions: survey.shuffle_questions,
+                            shuffle_options: survey.shuffle_options,
+                            max_attempts: survey.max_attempts,
+                            requires_manual_evaluation: survey.requires_manual_evaluation,
+                            allow_anonymous: survey.allow_anonymous,
+                            participant_fields: survey.participant_fields || [],
+                        },
+                        questions: draftQuestions,
+                        options: draftOptions,
+                    },
+                    lastSaved: new Date().toISOString(),
+                };
+
+                setDraft(editDraft);
+
+                // Also set UI questions state
+                const uiQuestions: Question[] = (survey.questions || []).map((q: any, idx: number) => ({
+                    id: (idx + 1).toString(),
+                    text: q.question_text,
+                    type: q.question_type as Question['type'],
+                    mandatory: q.mandatory || false,
+                    correctAnswers: q.correct_answers || "",
+                    points: q.points,
+                    explanation: q.explanation,
+                    requiresJustification: q.requires_justification || false,
+                    justificationRequired: q.justification_required || false,
+                    options: (q.options || []).map((opt: any, optIdx: number) => ({
+                        id: `${idx + 1}-opt-${optIdx}`,
+                        text: opt.option_text,
+                    })),
+                    mediaFiles: (q.media_files || []).map((m: any) => ({
+                        id: m.id.toString(),
+                        url: m.file_url,
+                        type: m.file_type,
+                        status: 'READY' as const,
+                    })),
+                }));
+                setQuestions(uiQuestions);
+
+                toast.success(`Loaded "${survey.title}" for editing`);
+            } catch (error: any) {
+                console.error("Failed to load survey for editing:", error);
+                toast.error("Failed to load survey. Make sure you own it.");
+                router.push("/dashboard");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        // Clear localStorage draft to avoid confusion
+        localStorage.removeItem(STORAGE_KEY);
+        loadSurveyForEditing();
+    }, [editSurveyId]);
+
+    // Resume an existing server-side draft (?draftId=). Hydrates the editor from the survey_drafts row
+    // so "Continue Draft" from the dashboard works, and subsequent autosaves update the SAME draft.
+    useEffect(() => {
+        if (!draftIdParam || editSurveyId) return;
+
+        const loadDraftForEditing = async () => {
+            try {
+                setIsLoading(true);
+                const res = await fetch(`${SURVEY_URL}/api/v1/drafts/${draftIdParam}`, { credentials: 'include' });
+                if (!res.ok) throw new Error(`Failed to load draft: ${res.status}`);
+                const json = await res.json();
+                const data = json.data || json;
+                const content = data.draft_content || {};
+                const basicInfo = content.basicInfo || {};
+                const rawQuestions: ParsedDraftQuestion[] = content.questions || [];
+                const rawOptions: Array<{ option_text: string; question_id: number }> = content.options || [];
+                const rawMedia: Array<{ question_id: number; file_url: string; file_type: string }> = content.mediaFiles || [];
+
+                // Draft-format questions (with their media)
+                const draftQuestions: DraftQuestion[] = rawQuestions.map((q) => ({
+                    question_id: q.question_id as number,
+                    question_text: q.question_text || "",
+                    question_type: q.question_type || "multiple-choice",
+                    mandatory: q.mandatory || false,
+                    correct_answers: q.correct_answers || "",
+                    points: q.points,
+                    explanation: q.explanation,
+                    requires_justification: q.requires_justification || false,
+                    justification_required: q.justification_required || false,
+                    mediaFiles: rawMedia.filter((m) => m.question_id === q.question_id).map((m) => ({
+                        mediaId: 0, fileUrl: m.file_url, fileType: m.file_type, status: 'READY' as const,
+                    })),
+                }));
+
+                // Draft-format options (synthesize a stable optionId per question)
+                const draftOptions: DraftOption[] = [];
+                rawQuestions.forEach((q) => {
+                    rawOptions.filter((o) => o.question_id === q.question_id).forEach((o, idx) => {
+                        draftOptions.push({ optionId: `${q.question_id}-opt-${idx}`, question_id: q.question_id as number, option_text: o.option_text });
+                    });
+                });
+
+                const loadedDraft: SurveyDraft = {
+                    draftId: data.id,
+                    surveyId: data.survey_id || undefined,
+                    draftContent: {
+                        basicInfo: {
+                            title: basicInfo.title || "",
+                            description: basicInfo.description || "",
+                            is_self_recruitment: basicInfo.is_self_recruitment || false,
+                            conductor_id: basicInfo.conductor_id || 0,
+                            status: basicInfo.status || "DRAFT",
+                            question_display_mode: basicInfo.question_display_mode || 'one_by_one',
+                            is_quiz: basicInfo.is_quiz || false,
+                            time_limit_minutes: basicInfo.time_limit_minutes,
+                            passing_score_percentage: basicInfo.passing_score_percentage,
+                            show_correct_answers: basicInfo.show_correct_answers,
+                            shuffle_questions: basicInfo.shuffle_questions,
+                            shuffle_options: basicInfo.shuffle_options,
+                            max_attempts: basicInfo.max_attempts,
+                            requires_manual_evaluation: basicInfo.requires_manual_evaluation,
+                            allow_anonymous: basicInfo.allow_anonymous,
+                            participant_fields: basicInfo.participant_fields || [],
+                        },
+                        questions: draftQuestions,
+                        options: draftOptions,
+                    },
+                    lastSaved: data.last_saved || new Date().toISOString(),
+                };
+                setDraft(loadedDraft);
+
+                // UI questions state
+                const uiQuestions: Question[] = rawQuestions.map((q) => ({
+                    id: (q.question_id ?? 1).toString(),
+                    text: q.question_text || "",
+                    type: (q.question_type || "multiple-choice") as Question['type'],
+                    mandatory: q.mandatory || false,
+                    correctAnswers: q.correct_answers || "",
+                    points: q.points,
+                    explanation: q.explanation,
+                    requiresJustification: q.requires_justification || false,
+                    justificationRequired: q.justification_required || false,
+                    options: rawOptions.filter((o) => o.question_id === q.question_id).map((o, idx) => ({
+                        id: `${q.question_id}-opt-${idx}`, text: o.option_text,
+                    })),
+                    mediaFiles: rawMedia.filter((m) => m.question_id === q.question_id).map((m, idx) => ({
+                        id: `${q.question_id}-media-${idx}`, url: m.file_url, type: m.file_type, status: 'READY' as const,
+                    })),
+                }));
+                setQuestions(uiQuestions);
+
+                toast.success("Loaded draft for editing");
+            } catch (e) {
+                console.error("Failed to load draft:", e);
+                toast.error("Failed to load draft. It may have been deleted.");
+                router.push("/dashboard");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        // Avoid a stale localStorage copy clobbering the server draft
+        localStorage.removeItem(STORAGE_KEY);
+        loadDraftForEditing();
+    }, [draftIdParam, editSurveyId]);
+
+    // Load draft from localStorage on mount (skip if editing a published survey, resuming a server draft, or creating new)
+    useEffect(() => {
+        if (editSurveyId || draftIdParam) return; // Skip — survey/draft loaded from API above
+
+        // Clear old draft when creating a brand new survey
+        if (isNewSurvey) {
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(BACKUP_KEY);
+            console.log("New survey — cleared old draft from localStorage");
+            return;
+        }
+
         try {
             // Try to load from localStorage
             const savedDraft = localStorage.getItem(STORAGE_KEY);
@@ -674,13 +993,17 @@ export default function SurveyCreatePage() {
                                 id: opt.optionId || `${q.question_id}-opt-${idx}`,
                                 text: opt.option_text
                             }));
-                        
+
                         return {
                             id: (q.question_id || 1).toString(),
                             text: q.question_text,
                             type: q.question_type as Question['type'],
                             mandatory: q.mandatory || false,
                             correctAnswers: q.correct_answers || "",
+                            points: q.points,
+                            explanation: q.explanation,
+                            requiresJustification: q.requires_justification || false,
+                            justificationRequired: q.justification_required || false,
                             options: questionOptions,
                             mediaFiles: q.mediaFiles?.map((m) => ({
                                 id: m.mediaId.toString(),
@@ -722,8 +1045,8 @@ export default function SurveyCreatePage() {
                 }
 
                 try {
-                    // Get current conductor information
-                    const response = await fetch(`http://localhost:5171/api/Conductor/current`, {
+                    // Get current conductor information (uses auth service via proxy)
+                    const response = await fetch(`${AUTH_URL}/api/Conductor/current`, {
                         method: 'GET',
                         headers: {
                             'Content-Type': 'application/json',
@@ -826,33 +1149,47 @@ export default function SurveyCreatePage() {
 
     // Handle media upload
     const handleMediaUpload = async (file: File, questionId: string) => {
-        // Parse question ID to number
         const questionIdNum = parseInt(questionId);
-        
-        // Create a temporary ID for the media file
         const tempMediaId = Date.now().toString();
+        const blobUrl = URL.createObjectURL(file);
+        const detectedType = file.type.startsWith('image/') ? 'IMAGE' : 'DOCUMENT';
         
-        // Update UI state first with uploading status
-        setQuestions(
-            questions.map((q) =>
+        // Update UI state with uploading status
+        setQuestions(prev =>
+            prev.map((q) =>
                 q.id === questionId
                     ? {
                           ...q,
                           mediaFiles: [
                               ...(q.mediaFiles || []),
-                              {
-                                  id: tempMediaId,
-                                  url: URL.createObjectURL(file),
-                                  type: file.type.startsWith('image/') ? 'IMAGE' : 'DOCUMENT',
-                                  status: 'UPLOADING'
-                              }
+                              { id: tempMediaId, url: blobUrl, type: detectedType, status: 'UPLOADING' }
                           ]
                       }
                     : q
             )
         );
         
-        // Create form data for upload
+        // Update draft state with uploading status (use functional updater to avoid stale closure)
+        setDraft(prevDraft => {
+            const updated = {
+                ...prevDraft,
+                draftContent: {
+                    ...prevDraft.draftContent,
+                    questions: prevDraft.draftContent.questions.map(q =>
+                        q.question_id === questionIdNum ? {
+                            ...q,
+                            mediaFiles: [
+                                ...(q.mediaFiles || []),
+                                { mediaId: parseInt(tempMediaId), fileUrl: blobUrl, fileType: detectedType, status: 'UPLOADING' as const }
+                            ]
+                        } : q
+                    )
+                },
+                lastSaved: new Date().toISOString()
+            };
+            return updated;
+        });
+
         const formData = new FormData();
         formData.append('file', file);
         if (draft.draftId) {
@@ -860,29 +1197,10 @@ export default function SurveyCreatePage() {
         }
 
         try {
-            // Update draft state with uploading status
-            const updatedDraftQuestions = draft.draftContent.questions.map(q =>
-                q.question_id === questionIdNum ? {
-                    ...q,
-                    mediaFiles: [
-                        ...(q.mediaFiles || []),
-                        { 
-                            mediaId: parseInt(tempMediaId), 
-                            fileUrl: URL.createObjectURL(file), 
-                            fileType: file.type.startsWith('image/') ? 'IMAGE' : 'DOCUMENT',
-                            status: 'UPLOADING' as const 
-                        }
-                    ]
-                } : q
-            );
-            
-            // Update draft with uploading status
-            updateDraft({ questions: updatedDraftQuestions });
-            
-            // Send to server
-            const response = await fetch(`${API_BASE_URL}/api/v1/media/upload`, {
+            const response = await fetch(`${SURVEY_URL}/api/v1/media/upload`, {
                 method: 'POST',
-                body: formData
+                body: formData,
+                credentials: 'include',
             });
 
             if (!response.ok) {
@@ -891,9 +1209,9 @@ export default function SurveyCreatePage() {
 
             const { mediaId, fileUrl, fileType } = await response.json();
             
-            // Update UI state with success
-            setQuestions(
-                questions.map((q) =>
+            // Update UI state with success (functional updater for latest state)
+            setQuestions(prev =>
+                prev.map((q) =>
                     q.id === questionId
                         ? {
                               ...q,
@@ -907,26 +1225,36 @@ export default function SurveyCreatePage() {
                 )
             );
 
-            // Update draft state with success
-            const finalUpdatedQuestions = draft.draftContent.questions.map(q =>
-                q.question_id === questionIdNum ? {
-                    ...q,
-                    mediaFiles: (q.mediaFiles || []).map(m => 
-                        m.mediaId === parseInt(tempMediaId)
-                            ? { mediaId, fileUrl, fileType, status: 'READY' as const }
-                            : m
-                    )
-                } : q
-            );
-
-            updateDraft({ questions: finalUpdatedQuestions }, questionId);
+            // Update draft state with success (functional updater for latest state)
+            setDraft(prevDraft => {
+                const updated = {
+                    ...prevDraft,
+                    draftContent: {
+                        ...prevDraft.draftContent,
+                        questions: prevDraft.draftContent.questions.map(q =>
+                            q.question_id === questionIdNum ? {
+                                ...q,
+                                mediaFiles: (q.mediaFiles || []).map(m => 
+                                    m.mediaId === parseInt(tempMediaId)
+                                        ? { mediaId, fileUrl, fileType, status: 'READY' as const }
+                                        : m
+                                )
+                            } : q
+                        )
+                    },
+                    lastEditedQuestion: questionId,
+                    lastSaved: new Date().toISOString()
+                };
+                requestAnimationFrame(() => { saveDraft(updated); });
+                return updated;
+            });
             toast.success('Media uploaded successfully');
         } catch (error) {
             console.error('Upload failed:', error);
             
             // Update UI state with error
-            setQuestions(
-                questions.map((q) =>
+            setQuestions(prev =>
+                prev.map((q) =>
                     q.id === questionId
                         ? {
                               ...q,
@@ -940,19 +1268,28 @@ export default function SurveyCreatePage() {
                 )
             );
             
-            // Update draft state with error
-            const errorUpdatedQuestions = draft.draftContent.questions.map(q =>
-                q.question_id === questionIdNum ? {
-                    ...q,
-                    mediaFiles: (q.mediaFiles || []).map(m => 
-                        m.mediaId === parseInt(tempMediaId)
-                            ? { ...m, status: 'ERROR' as const }
-                            : m
-                    )
-                } : q
-            );
-            
-            updateDraft({ questions: errorUpdatedQuestions });
+            // Update draft state with error (functional updater)
+            setDraft(prevDraft => {
+                const updated = {
+                    ...prevDraft,
+                    draftContent: {
+                        ...prevDraft.draftContent,
+                        questions: prevDraft.draftContent.questions.map(q =>
+                            q.question_id === questionIdNum ? {
+                                ...q,
+                                mediaFiles: (q.mediaFiles || []).map(m => 
+                                    m.mediaId === parseInt(tempMediaId)
+                                        ? { ...m, status: 'ERROR' as const }
+                                        : m
+                                )
+                            } : q
+                        )
+                    },
+                    lastSaved: new Date().toISOString()
+                };
+                requestAnimationFrame(() => { saveDraft(updated); });
+                return updated;
+            });
             toast.error('Failed to upload media');
         }
     };
@@ -996,14 +1333,18 @@ export default function SurveyCreatePage() {
     const handlePublish = async () => {
         setIsSubmitting(true);
         try {
+            // Use ref to get the absolute latest draft state (avoids stale closures)
+            const latestDraft = draftRef.current;
+            
             console.log("Starting publish process. Current draft:", {
-                draftId: draft.draftId,
-                hasTitle: !!draft.draftContent.basicInfo.title,
-                questionsCount: draft.draftContent.questions.length
+                draftId: latestDraft.draftId,
+                hasTitle: !!latestDraft.draftContent.basicInfo.title,
+                questionsCount: latestDraft.draftContent.questions.length,
+                mediaFilesCount: latestDraft.draftContent.questions.reduce((sum, q) => sum + (q.mediaFiles?.length || 0), 0)
             });
             
             // Double-check if draftId is available in localStorage even if not in state
-            if (!draft.draftId) {
+            if (!latestDraft.draftId) {
                 console.log("No draft ID in current state, checking localStorage");
                 try {
                     const savedDraft = localStorage.getItem(STORAGE_KEY);
@@ -1011,15 +1352,17 @@ export default function SurveyCreatePage() {
                         const parsed = JSON.parse(savedDraft);
                         if (parsed.draftId) {
                             console.log("Found draftId in localStorage that's not in state:", parsed.draftId);
-                            // Update the state with the draftId from localStorage
                             const draftId = parsed.draftId;
-                            setDraft(prevDraft => ({
-                                ...prevDraft,
-                                draftId: draftId
-                            }));
+                            const draftWithId = { ...latestDraft, draftId };
+                            setDraft(draftWithId);
                             
-                            // Now publish the saved draft
-                            const publishUrl = `${API_BASE_URL}/api/SurveyProxy/drafts/${draftId}/publish`;
+                            // Re-sync latest content before publishing
+                            const reSyncedDraft = await syncWithBackend(draftWithId);
+                            if (reSyncedDraft && reSyncedDraft.draftId) {
+                                setDraft(reSyncedDraft);
+                            }
+                            
+                            const publishUrl = `${SURVEY_URL}/api/v1/drafts/${draftId}/publish`;
                             console.log(`Publishing draft to: ${publishUrl}`);
                             
                             const response = await fetch(publishUrl, {
@@ -1052,7 +1395,7 @@ export default function SurveyCreatePage() {
                             localStorage.removeItem(STORAGE_KEY);
                             localStorage.removeItem(BACKUP_KEY);
                             toast.success("Survey published successfully!");
-                            router.push('/surveys');
+                            router.push('/dashboard');
                             return;
                         }
                     }
@@ -1064,14 +1407,14 @@ export default function SurveyCreatePage() {
                 toast.info("Saving draft before publishing...");
                 
                 // Check if we have a valid draft to save
-                if (!draft.draftContent.basicInfo.title && draft.draftContent.questions.length === 0) {
+                if (!latestDraft.draftContent.basicInfo.title && latestDraft.draftContent.questions.length === 0) {
                     toast.warning("Please add a title or questions before publishing");
                     setIsSubmitting(false);
                     return;
                 }
                 
                 // Save the draft first
-                const savedDraft = await syncWithBackend(draft);
+                const savedDraft = await syncWithBackend(latestDraft);
                 if (!savedDraft || !savedDraft.draftId) {
                     toast.error("Failed to save draft before publishing");
                     setIsSubmitting(false);
@@ -1083,11 +1426,18 @@ export default function SurveyCreatePage() {
                 toast.success("Draft saved successfully");
                 console.log("Draft saved. New draftId:", savedDraft.draftId);
             } else {
-                console.log("Using existing draftId:", draft.draftId);
+                console.log("Using existing draftId:", latestDraft.draftId);
+                // Always re-sync the latest draft content before publishing
+                const reSyncedDraft = await syncWithBackend(draftRef.current);
+                if (reSyncedDraft && reSyncedDraft.draftId) {
+                    setDraft(reSyncedDraft);
+                    console.log("Draft re-synced before publish. draftId:", reSyncedDraft.draftId);
+                }
             }
 
-            // Ensure we have a valid draftId before proceeding
-            if (!draft.draftId) {
+            // Use ref again for the most up-to-date draftId
+            const finalDraft = draftRef.current;
+            if (!finalDraft.draftId) {
                 console.error("Still no draftId after save attempt");
                 toast.error("Could not obtain a draft ID. Please try saving manually first.");
                 setIsSubmitting(false);
@@ -1095,7 +1445,7 @@ export default function SurveyCreatePage() {
             }
 
             // Now publish the saved draft
-            const publishUrl = `${API_BASE_URL}/api/SurveyProxy/drafts/${draft.draftId}/publish`;
+            const publishUrl = `${SURVEY_URL}/api/v1/drafts/${finalDraft.draftId}/publish`;
             console.log(`Publishing draft to: ${publishUrl}`);
             
             const response = await fetch(publishUrl, {
@@ -1128,7 +1478,7 @@ export default function SurveyCreatePage() {
             localStorage.removeItem(STORAGE_KEY);
             localStorage.removeItem(BACKUP_KEY);
             toast.success("Survey published successfully!");
-            router.push('/surveys');
+            router.push('/dashboard');
         } catch (error: unknown) {
             console.error('Publishing failed:', error);
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -1140,12 +1490,12 @@ export default function SurveyCreatePage() {
 
     const addQuestion = () => {
         // Get the next sequential question ID
-        const nextQuestionId = draft.draftContent.questions.length > 0 
+        const nextQuestionId = draft.draftContent.questions.length > 0
             ? Math.max(...draft.draftContent.questions.map(q => q.question_id).filter(id => id !== undefined)) + 1
             : 1;
-        
+
         const optionId = `${nextQuestionId}-opt-0`;
-        
+
         // Create question for UI state
         const newQuestion: Question = {
             id: nextQuestionId.toString(),
@@ -1154,20 +1504,27 @@ export default function SurveyCreatePage() {
             options: [{ id: optionId, text: "" }],
             mediaFiles: [],
             mandatory: false,
-            correctAnswers: ""
+            correctAnswers: "",
+            points: draft.draftContent.basicInfo.is_quiz ? 1 : undefined,
+            explanation: draft.draftContent.basicInfo.is_quiz ? "" : undefined,
+            requiresJustification: false,
+            justificationRequired: false
         };
-        
+
         // Update UI state
         setQuestions([...questions, newQuestion]);
-        
+
         // Also update draft state for localStorage
         const newDraftQuestion = {
             question_id: nextQuestionId,
             question_text: "",
             question_type: "multiple-choice",
             mandatory: false,
-            branching_logic: "",
             correct_answers: "",
+            points: draft.draftContent.basicInfo.is_quiz ? 1 : undefined,
+            explanation: draft.draftContent.basicInfo.is_quiz ? "" : undefined,
+            requires_justification: false,
+            justification_required: false,
             mediaFiles: []
         };
         
@@ -1400,6 +1757,507 @@ export default function SurveyCreatePage() {
                                     basicInfo: { ...draft.draftContent.basicInfo, description: e.target.value }
                                 })}
                             />
+
+                            {/* Question Display Mode — applies to all surveys */}
+                            <div className="border-t pt-4 space-y-2">
+                                <label className="text-sm font-medium">How should questions be shown to participants?</label>
+                                <p className="text-xs text-gray-500">Use the Preview button to see your choice live.</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                                    {([
+                                        { mode: 'one_by_one' as const, title: 'One at a time', desc: 'Participants see a single question per screen with Next/Previous.', bars: 1 },
+                                        { mode: 'all_at_once' as const, title: 'All on one page', desc: 'All questions on one scrollable page with a single Submit (Google Form style).', bars: 3 },
+                                    ]).map(({ mode, title, desc, bars }) => {
+                                        const selected = (draft.draftContent.basicInfo.question_display_mode || 'one_by_one') === mode;
+                                        return (
+                                            <button
+                                                key={mode}
+                                                type="button"
+                                                onClick={() => updateDraft({
+                                                    basicInfo: { ...draft.draftContent.basicInfo, question_display_mode: mode }
+                                                })}
+                                                className={`text-left p-3 rounded-lg border-2 transition-all ${selected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-blue-300'}`}
+                                            >
+                                                {/* mini mockup */}
+                                                <div className="flex flex-col gap-1 mb-2 bg-white rounded border border-gray-200 p-2 h-16 justify-center">
+                                                    {Array.from({ length: bars }).map((_, i) => (
+                                                        <div key={i} className="space-y-1">
+                                                            <div className="h-1.5 w-3/4 rounded bg-gray-300" />
+                                                            <div className="h-1 w-1/2 rounded bg-gray-200" />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${selected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`}>
+                                                        {selected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                                    </div>
+                                                    <span className="text-sm font-medium">{title}</span>
+                                                </div>
+                                                <p className="text-xs text-gray-500 mt-1">{desc}</p>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Quiz Mode Toggle */}
+                            <div className="border-t pt-4 space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <Checkbox
+                                        id="quiz-mode"
+                                        checked={draft.draftContent.basicInfo.is_quiz || false}
+                                        onCheckedChange={(checked: CheckedState) => {
+                                            const isQuiz = checked === true;
+                                            updateDraft({
+                                                basicInfo: {
+                                                    ...draft.draftContent.basicInfo,
+                                                    is_quiz: isQuiz,
+                                                    // Set defaults when enabling quiz mode
+                                                    show_correct_answers: isQuiz ? true : undefined,
+                                                    shuffle_questions: isQuiz ? false : undefined,
+                                                    shuffle_options: isQuiz ? false : undefined
+                                                }
+                                            });
+                                        }}
+                                    />
+                                    <label htmlFor="quiz-mode" className="text-sm font-medium cursor-pointer">
+                                        Create as Quiz
+                                    </label>
+                                </div>
+
+                                {/* Quiz-specific fields */}
+                                {draft.draftContent.basicInfo.is_quiz && (
+                                    <div className="ml-6 space-y-3 border-l-2 border-primary pl-4">
+                                        <div className="space-y-2">
+                                            <label htmlFor="time-limit" className="text-sm font-medium">
+                                                Time Limit (minutes) - Optional
+                                            </label>
+                                            <Input
+                                                id="time-limit"
+                                                type="number"
+                                                min="1"
+                                                placeholder="e.g., 30"
+                                                value={draft.draftContent.basicInfo.time_limit_minutes || ''}
+                                                onChange={(e) => updateDraft({
+                                                    basicInfo: {
+                                                        ...draft.draftContent.basicInfo,
+                                                        time_limit_minutes: e.target.value ? parseInt(e.target.value) : undefined
+                                                    }
+                                                })}
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label htmlFor="passing-score" className="text-sm font-medium">
+                                                Passing Score (%) - Optional
+                                            </label>
+                                            <Input
+                                                id="passing-score"
+                                                type="number"
+                                                min="0"
+                                                max="100"
+                                                placeholder="e.g., 70"
+                                                value={draft.draftContent.basicInfo.passing_score_percentage || ''}
+                                                onChange={(e) => updateDraft({
+                                                    basicInfo: {
+                                                        ...draft.draftContent.basicInfo,
+                                                        passing_score_percentage: e.target.value ? parseInt(e.target.value) : undefined
+                                                    }
+                                                })}
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label htmlFor="max-attempts" className="text-sm font-medium">
+                                                Maximum Attempts - Optional
+                                            </label>
+                                            <Input
+                                                id="max-attempts"
+                                                type="number"
+                                                min="1"
+                                                placeholder="Leave empty for unlimited"
+                                                value={draft.draftContent.basicInfo.max_attempts || ''}
+                                                onChange={(e) => updateDraft({
+                                                    basicInfo: {
+                                                        ...draft.draftContent.basicInfo,
+                                                        max_attempts: e.target.value ? parseInt(e.target.value) : undefined
+                                                    }
+                                                })}
+                                            />
+                                            <p className="text-xs text-gray-500">
+                                                Limit how many times each participant can take this quiz
+                                            </p>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="show-correct"
+                                                checked={draft.draftContent.basicInfo.show_correct_answers !== false}
+                                                onCheckedChange={(checked: CheckedState) => {
+                                                    updateDraft({
+                                                        basicInfo: {
+                                                            ...draft.draftContent.basicInfo,
+                                                            show_correct_answers: checked === true
+                                                        }
+                                                    });
+                                                }}
+                                            />
+                                            <label htmlFor="show-correct" className="text-sm">
+                                                Show correct answers after completion
+                                            </label>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="shuffle-questions"
+                                                checked={draft.draftContent.basicInfo.shuffle_questions || false}
+                                                onCheckedChange={(checked: CheckedState) => {
+                                                    updateDraft({
+                                                        basicInfo: {
+                                                            ...draft.draftContent.basicInfo,
+                                                            shuffle_questions: checked === true
+                                                        }
+                                                    });
+                                                }}
+                                            />
+                                            <label htmlFor="shuffle-questions" className="text-sm">
+                                                Shuffle questions for each participant
+                                            </label>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="shuffle-options"
+                                                checked={draft.draftContent.basicInfo.shuffle_options || false}
+                                                onCheckedChange={(checked: CheckedState) => {
+                                                    updateDraft({
+                                                        basicInfo: {
+                                                            ...draft.draftContent.basicInfo,
+                                                            shuffle_options: checked === true
+                                                        }
+                                                    });
+                                                }}
+                                            />
+                                            <label htmlFor="shuffle-options" className="text-sm">
+                                                Shuffle answer options for each question
+                                            </label>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-blue-200">
+                                            <Checkbox
+                                                id="manual-evaluation"
+                                                checked={draft.draftContent.basicInfo.requires_manual_evaluation || false}
+                                                onCheckedChange={(checked: CheckedState) => {
+                                                    updateDraft({
+                                                        basicInfo: {
+                                                            ...draft.draftContent.basicInfo,
+                                                            requires_manual_evaluation: checked === true
+                                                        }
+                                                    });
+                                                }}
+                                            />
+                                            <div>
+                                                <label htmlFor="manual-evaluation" className="text-sm font-medium cursor-pointer">
+                                                    Enable Manual Evaluation
+                                                </label>
+                                                <p className="text-xs text-gray-500">
+                                                    Review and grade each submission manually. Required if you have text, rating, image upload, or code questions.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        {!draft.draftContent.basicInfo.requires_manual_evaluation &&
+                                          questions.some(q => ["text", "rating", "image-upload", "code"].includes(q.type)) && (
+                                            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2 flex items-center gap-2">
+                                                <span>⚠️</span>
+                                                <span>You have questions that need manual grading (text, rating, image upload, or code). Consider enabling Manual Evaluation above so participants see "Pending Evaluation" instead of 0 points.</span>
+                                            </div>
+                                        )}
+
+                                        {/* Excel Template Upload */}
+                                        <div className="mt-4 pt-4 border-t border-blue-200">
+                                            <QuizTemplateUploader
+                                                existingQuestionCount={questions.length}
+                                                onQuestionsLoaded={(parsedQuestions, draftQuestions, draftOptions) => {
+                                                    // Add parsed questions to existing questions
+                                                    setQuestions(prev => [...prev, ...parsedQuestions]);
+                                                    
+                                                    // Update draft with new questions and options
+                                                    updateDraft({
+                                                        questions: [...draft.draftContent.questions, ...draftQuestions],
+                                                        options: [...draft.draftContent.options, ...draftOptions]
+                                                    });
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Anonymous Participation Toggle */}
+                            <div className="border-t pt-4">
+                                <div className="flex items-center gap-2">
+                                    <Checkbox
+                                        id="allow-anonymous"
+                                        checked={draft.draftContent.basicInfo.allow_anonymous || false}
+                                        onCheckedChange={(checked: CheckedState) => {
+                                            updateDraft({
+                                                basicInfo: {
+                                                    ...draft.draftContent.basicInfo,
+                                                    allow_anonymous: checked === true
+                                                }
+                                            });
+                                        }}
+                                    />
+                                    <label htmlFor="allow-anonymous" className="text-sm font-medium cursor-pointer">
+                                        Allow Anonymous Participation
+                                    </label>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1 ml-6">
+                                    When enabled, participants can take the survey without registering an account.
+                                </p>
+                            </div>
+
+                            {/* Custom Participant Fields */}
+                            <div className="border-t pt-4 mt-4">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div>
+                                        <h3 className="text-sm font-medium">Collect Participant Information</h3>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            Add custom fields to collect additional info from participants before they start.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Quick Add Preset Fields */}
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            const existingFields = draft.draftContent.basicInfo.participant_fields || [];
+                                            if (!existingFields.find(f => f.id === 'name')) {
+                                                updateDraft({
+                                                    basicInfo: {
+                                                        ...draft.draftContent.basicInfo,
+                                                        participant_fields: [...existingFields, {
+                                                            id: 'name',
+                                                            label: 'Full Name',
+                                                            type: 'text' as const,
+                                                            required: true,
+                                                            placeholder: 'Enter your full name'
+                                                        }]
+                                                    }
+                                                });
+                                            }
+                                        }}
+                                        disabled={(draft.draftContent.basicInfo.participant_fields || []).some(f => f.id === 'name')}
+                                    >
+                                        <User className="h-3 w-3 mr-1" />
+                                        + Name
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            const existingFields = draft.draftContent.basicInfo.participant_fields || [];
+                                            if (!existingFields.find(f => f.id === 'email')) {
+                                                updateDraft({
+                                                    basicInfo: {
+                                                        ...draft.draftContent.basicInfo,
+                                                        participant_fields: [...existingFields, {
+                                                            id: 'email',
+                                                            label: 'Email Address',
+                                                            type: 'email' as const,
+                                                            required: true,
+                                                            placeholder: 'Enter your email'
+                                                        }]
+                                                    }
+                                                });
+                                            }
+                                        }}
+                                        disabled={(draft.draftContent.basicInfo.participant_fields || []).some(f => f.id === 'email')}
+                                    >
+                                        <Mail className="h-3 w-3 mr-1" />
+                                        + Email
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            const existingFields = draft.draftContent.basicInfo.participant_fields || [];
+                                            if (!existingFields.find(f => f.id === 'roll_no')) {
+                                                updateDraft({
+                                                    basicInfo: {
+                                                        ...draft.draftContent.basicInfo,
+                                                        participant_fields: [...existingFields, {
+                                                            id: 'roll_no',
+                                                            label: 'Roll Number',
+                                                            type: 'text' as const,
+                                                            required: false,
+                                                            placeholder: 'Enter your roll number'
+                                                        }]
+                                                    }
+                                                });
+                                            }
+                                        }}
+                                        disabled={(draft.draftContent.basicInfo.participant_fields || []).some(f => f.id === 'roll_no')}
+                                    >
+                                        <Hash className="h-3 w-3 mr-1" />
+                                        + Roll No
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            const existingFields = draft.draftContent.basicInfo.participant_fields || [];
+                                            if (!existingFields.find(f => f.id === 'phone')) {
+                                                updateDraft({
+                                                    basicInfo: {
+                                                        ...draft.draftContent.basicInfo,
+                                                        participant_fields: [...existingFields, {
+                                                            id: 'phone',
+                                                            label: 'Phone Number',
+                                                            type: 'tel' as const,
+                                                            required: false,
+                                                            placeholder: 'Enter your phone number'
+                                                        }]
+                                                    }
+                                                });
+                                            }
+                                        }}
+                                        disabled={(draft.draftContent.basicInfo.participant_fields || []).some(f => f.id === 'phone')}
+                                    >
+                                        <Phone className="h-3 w-3 mr-1" />
+                                        + Phone
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            const existingFields = draft.draftContent.basicInfo.participant_fields || [];
+                                            const newId = `custom_${Date.now()}`;
+                                            updateDraft({
+                                                basicInfo: {
+                                                    ...draft.draftContent.basicInfo,
+                                                    participant_fields: [...existingFields, {
+                                                        id: newId,
+                                                        label: 'Custom Field',
+                                                        type: 'text' as const,
+                                                        required: false,
+                                                        placeholder: ''
+                                                    }]
+                                                }
+                                            });
+                                        }}
+                                    >
+                                        <Plus className="h-3 w-3 mr-1" />
+                                        Custom Field
+                                    </Button>
+                                </div>
+
+                                {/* Display Added Fields */}
+                                {(draft.draftContent.basicInfo.participant_fields || []).length > 0 && (
+                                    <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
+                                        {(draft.draftContent.basicInfo.participant_fields || []).map((field, index) => (
+                                            <div key={field.id} className="flex items-center gap-2 bg-background p-2 rounded border">
+                                                <div className="flex-1 grid grid-cols-4 gap-2">
+                                                    <Input
+                                                        placeholder="Field Label"
+                                                        value={field.label}
+                                                        onChange={(e) => {
+                                                            const fields = [...(draft.draftContent.basicInfo.participant_fields || [])];
+                                                            fields[index] = { ...fields[index], label: e.target.value };
+                                                            updateDraft({
+                                                                basicInfo: {
+                                                                    ...draft.draftContent.basicInfo,
+                                                                    participant_fields: fields
+                                                                }
+                                                            });
+                                                        }}
+                                                        className="text-sm"
+                                                    />
+                                                    <Select
+                                                        value={field.type}
+                                                        onValueChange={(value: 'text' | 'email' | 'number' | 'tel') => {
+                                                            const fields = [...(draft.draftContent.basicInfo.participant_fields || [])];
+                                                            fields[index] = { ...fields[index], type: value };
+                                                            updateDraft({
+                                                                basicInfo: {
+                                                                    ...draft.draftContent.basicInfo,
+                                                                    participant_fields: fields
+                                                                }
+                                                            });
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="text-sm">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="text">Text</SelectItem>
+                                                            <SelectItem value="email">Email</SelectItem>
+                                                            <SelectItem value="number">Number</SelectItem>
+                                                            <SelectItem value="tel">Phone</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                    <Input
+                                                        placeholder="Placeholder text"
+                                                        value={field.placeholder || ''}
+                                                        onChange={(e) => {
+                                                            const fields = [...(draft.draftContent.basicInfo.participant_fields || [])];
+                                                            fields[index] = { ...fields[index], placeholder: e.target.value };
+                                                            updateDraft({
+                                                                basicInfo: {
+                                                                    ...draft.draftContent.basicInfo,
+                                                                    participant_fields: fields
+                                                                }
+                                                            });
+                                                        }}
+                                                        className="text-sm"
+                                                    />
+                                                    <div className="flex items-center gap-2">
+                                                        <Checkbox
+                                                            id={`required-${field.id}`}
+                                                            checked={field.required}
+                                                            onCheckedChange={(checked: CheckedState) => {
+                                                                const fields = [...(draft.draftContent.basicInfo.participant_fields || [])];
+                                                                fields[index] = { ...fields[index], required: checked === true };
+                                                                updateDraft({
+                                                                    basicInfo: {
+                                                                        ...draft.draftContent.basicInfo,
+                                                                        participant_fields: fields
+                                                                    }
+                                                                });
+                                                            }}
+                                                        />
+                                                        <label htmlFor={`required-${field.id}`} className="text-xs">Required</label>
+                                                    </div>
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-destructive hover:text-destructive"
+                                                    onClick={() => {
+                                                        const fields = (draft.draftContent.basicInfo.participant_fields || []).filter(f => f.id !== field.id);
+                                                        updateDraft({
+                                                            basicInfo: {
+                                                                ...draft.draftContent.basicInfo,
+                                                                participant_fields: fields
+                                                            }
+                                                        });
+                                                    }}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         </CardContent>
                     </>
                 )}
@@ -1450,6 +2308,8 @@ export default function SurveyCreatePage() {
                                                 </SelectItem>
                                                 <SelectItem value="text">Text Input</SelectItem>
                                                 <SelectItem value="rating">Rating Scale</SelectItem>
+                                                <SelectItem value="code">Code Editor</SelectItem>
+                                                <SelectItem value="image-upload">Image Upload</SelectItem>
                                             </SelectContent>
                                         </Select>
                                         <div className="flex items-center gap-4">
@@ -1524,42 +2384,183 @@ export default function SurveyCreatePage() {
                                         )}
                                     </div>
 
-                                    <div className="space-y-2 mt-4">
-                                        <label htmlFor={`correct-answers-${question.id}`} className="text-sm font-medium flex items-center gap-2">
-                                            Correct Answer(s)
-                                            <span className="text-xs text-muted-foreground">
-                                                {question.type === "multiple-choice" 
-                                                    ? "(Comma-separated option numbers, e.g. 1,3,4)" 
-                                                    : question.type === "single-choice" 
-                                                    ? "(Enter the correct option number, e.g. 2)" 
-                                                    : "(Enter the correct answer text)"}
-                                            </span>
-                                        </label>
-                                        <Input
-                                            id={`correct-answers-${question.id}`}
-                                            value={question.correctAnswers || ""}
-                                            placeholder="Enter correct answer(s)"
-                                            onChange={(e) => {
-                                                // Update UI state
-                                                setQuestions(
-                                                    questions.map((q) =>
-                                                        q.id === question.id
-                                                            ? { ...q, correctAnswers: e.target.value }
-                                                            : q
-                                                    )
-                                                );
-                                                
-                                                // Also update draft state for localStorage
-                                                updateDraft({
-                                                    questions: draft.draftContent.questions.map(q => 
-                                                        q.question_id === parseInt(question.id)
-                                                            ? { ...q, correct_answers: e.target.value }
-                                                            : q
-                                                    )
-                                                });
-                                            }}
-                                        />
-                                    </div>
+                                    {/* Quiz-specific fields */}
+                                    {draft.draftContent.basicInfo.is_quiz && (
+                                        <div className="space-y-3 mt-4 p-3 bg-blue-50 rounded-md border border-blue-200">
+                                            <div className="text-sm font-medium text-blue-900">Quiz Settings</div>
+
+                                            {/* Correct Answer - only for auto-gradable types (single/multiple choice) */}
+                                            {(question.type === "single-choice" || question.type === "multiple-choice") && (
+                                            <div className="space-y-2">
+                                                <label htmlFor={`correct-answers-${question.id}`} className="text-sm font-medium flex items-center gap-2">
+                                                    Correct Answer(s) <span className="text-red-500">*</span>
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {question.type === "multiple-choice"
+                                                            ? "(Comma-separated option numbers, e.g. 1,3,4)"
+                                                            : "(Enter the correct option number, e.g. 2)"}
+                                                    </span>
+                                                </label>
+                                                <Input
+                                                    id={`correct-answers-${question.id}`}
+                                                    value={question.correctAnswers || ""}
+                                                    placeholder="Enter correct answer(s)"
+                                                    className="bg-white"
+                                                    onChange={(e) => {
+                                                        setQuestions(
+                                                            questions.map((q) =>
+                                                                q.id === question.id
+                                                                    ? { ...q, correctAnswers: e.target.value }
+                                                                    : q
+                                                            )
+                                                        );
+                                                        updateDraft({
+                                                            questions: draft.draftContent.questions.map(q =>
+                                                                q.question_id === parseInt(question.id)
+                                                                    ? { ...q, correct_answers: e.target.value }
+                                                                    : q
+                                                            )
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                            )}
+
+                                            {/* Manual grading note for non-auto-gradable types */}
+                                            {(question.type === "text" || question.type === "rating" || question.type === "image-upload") && (
+                                                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                                                    This question type requires manual evaluation by the conductor.
+                                                </div>
+                                            )}
+
+                                            <div className="space-y-2">
+                                                <label htmlFor={`points-${question.id}`} className="text-sm font-medium">
+                                                    Points (default: 1)
+                                                </label>
+                                                <Input
+                                                    id={`points-${question.id}`}
+                                                    type="number"
+                                                    min="0"
+                                                    value={question.points || 1}
+                                                    placeholder="1"
+                                                    className="bg-white"
+                                                    onChange={(e) => {
+                                                        const points = e.target.value ? parseInt(e.target.value) : 1;
+                                                        // Update UI state
+                                                        setQuestions(
+                                                            questions.map((q) =>
+                                                                q.id === question.id
+                                                                    ? { ...q, points }
+                                                                    : q
+                                                            )
+                                                        );
+
+                                                        // Also update draft state for localStorage
+                                                        updateDraft({
+                                                            questions: draft.draftContent.questions.map(q =>
+                                                                q.question_id === parseInt(question.id)
+                                                                    ? { ...q, points }
+                                                                    : q
+                                                            )
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+
+                                            <div className="space-y-2">
+                                                <label htmlFor={`explanation-${question.id}`} className="text-sm font-medium">
+                                                    Explanation (shown after quiz completion)
+                                                </label>
+                                                <Textarea
+                                                    id={`explanation-${question.id}`}
+                                                    value={question.explanation || ""}
+                                                    placeholder="Explain why this is the correct answer..."
+                                                    className="bg-white"
+                                                    rows={2}
+                                                    onChange={(e) => {
+                                                        // Update UI state
+                                                        setQuestions(
+                                                            questions.map((q) =>
+                                                                q.id === question.id
+                                                                    ? { ...q, explanation: e.target.value }
+                                                                    : q
+                                                            )
+                                                        );
+
+                                                        // Also update draft state for localStorage
+                                                        updateDraft({
+                                                            questions: draft.draftContent.questions.map(q =>
+                                                                q.question_id === parseInt(question.id)
+                                                                    ? { ...q, explanation: e.target.value }
+                                                                    : q
+                                                            )
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+
+                                            {/* Participant justification - only for choice questions (anti-cheating) */}
+                                            {(question.type === "single-choice" || question.type === "multiple-choice") && (
+                                            <div className="space-y-2 pt-2 border-t border-blue-200">
+                                                <div className="flex items-center gap-2">
+                                                    <Checkbox
+                                                        id={`requires-justification-${question.id}`}
+                                                        checked={question.requiresJustification || false}
+                                                        onCheckedChange={(checked: CheckedState) => {
+                                                            const requiresJustification = checked === true;
+                                                            // When turning off, also clear the mandatory flag
+                                                            const justificationRequired = requiresJustification ? (question.justificationRequired || false) : false;
+                                                            setQuestions(
+                                                                questions.map((q) =>
+                                                                    q.id === question.id
+                                                                        ? { ...q, requiresJustification, justificationRequired }
+                                                                        : q
+                                                                )
+                                                            );
+                                                            updateDraft({
+                                                                questions: draft.draftContent.questions.map(q =>
+                                                                    q.question_id === parseInt(question.id)
+                                                                        ? { ...q, requires_justification: requiresJustification, justification_required: justificationRequired }
+                                                                        : q
+                                                                )
+                                                            });
+                                                        }}
+                                                    />
+                                                    <label htmlFor={`requires-justification-${question.id}`} className="text-sm font-medium cursor-pointer">
+                                                        Ask participants to justify their answer
+                                                    </label>
+                                                </div>
+                                                {question.requiresJustification && (
+                                                    <div className="flex items-center gap-2 ml-6">
+                                                        <Checkbox
+                                                            id={`justification-required-${question.id}`}
+                                                            checked={question.justificationRequired || false}
+                                                            onCheckedChange={(checked: CheckedState) => {
+                                                                const justificationRequired = checked === true;
+                                                                setQuestions(
+                                                                    questions.map((q) =>
+                                                                        q.id === question.id
+                                                                            ? { ...q, justificationRequired }
+                                                                            : q
+                                                                    )
+                                                                );
+                                                                updateDraft({
+                                                                    questions: draft.draftContent.questions.map(q =>
+                                                                        q.question_id === parseInt(question.id)
+                                                                            ? { ...q, justification_required: justificationRequired }
+                                                                            : q
+                                                                    )
+                                                                });
+                                                            }}
+                                                        />
+                                                        <label htmlFor={`justification-required-${question.id}`} className="text-sm cursor-pointer">
+                                                            Make justification mandatory
+                                                        </label>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {/* Media upload and display section */}
                                     <div className="mt-4 space-y-2">
@@ -1601,11 +2602,15 @@ export default function SurveyCreatePage() {
                                                             </div>
                                                         )}
                                                         
-                                                        {media.type === 'IMAGE' ? (
+                                                        {media.type === 'IMAGE' || media.url?.match(/\.(jpg|jpeg|png|gif|webp)/i) ? (
                                                             <img 
                                                                 src={media.url} 
                                                                 alt="Question media" 
-                                                                className="w-full h-32 object-cover"
+                                                                className="w-full h-40 object-contain bg-gray-50 p-1"
+                                                                onError={(e) => {
+                                                                    const target = e.target as HTMLImageElement;
+                                                                    target.style.display = 'none';
+                                                                }}
                                                             />
                                                         ) : (
                                                             <div className="w-full h-32 bg-gray-100 flex items-center justify-center">
@@ -1626,7 +2631,8 @@ export default function SurveyCreatePage() {
                                         )}
                                     </div>
 
-                                    {question.type !== "text" && (
+                                    {/* Options for multiple/single choice and rating */}
+                                    {question.type !== "text" && question.type !== "code" && question.type !== "image-upload" && (
                                         <div className="space-y-2 ml-4">
                                             {question.options.map((option) => (
                                                 <div key={option.id} className="flex gap-2 items-center">
@@ -1650,10 +2656,10 @@ export default function SurveyCreatePage() {
                                                                         : q,
                                                                 ),
                                                             );
-                                                            
+
                                                             // Also update draft state for localStorage
                                                             updateDraft({
-                                                                options: draft.draftContent.options.map(opt => 
+                                                                options: draft.draftContent.options.map(opt =>
                                                                     (opt.question_id === parseInt(question.id) && opt.optionId === option.id)
                                                                         ? { ...opt, option_text: e.target.value }
                                                                         : opt
@@ -1681,6 +2687,40 @@ export default function SurveyCreatePage() {
                                             </Button>
                                         </div>
                                     )}
+
+                                    {/* Code Question Editor */}
+                                    {question.type === "code" && (
+                                        <div className="mt-4">
+                                            <CodeQuestionEditor
+                                                settings={question.codeSettings || {
+                                                    defaultLanguage: "python",
+                                                    allowedLanguages: ["python", "javascript"],
+                                                    testCases: [],
+                                                    starterCode: {}
+                                                }}
+                                                onChange={(settings) => {
+                                                    // Update UI state
+                                                    setQuestions(
+                                                        questions.map((q) =>
+                                                            q.id === question.id
+                                                                ? { ...q, codeSettings: settings }
+                                                                : q
+                                                        )
+                                                    );
+
+                                                    // Update draft state - store code settings as JSON in correct_answers field
+                                                    updateDraft({
+                                                        questions: draft.draftContent.questions.map(q =>
+                                                            q.question_id === parseInt(question.id)
+                                                                ? { ...q, correct_answers: JSON.stringify(settings) }
+                                                                : q
+                                                        )
+                                                    });
+                                                }}
+                                            />
+                                        </div>
+                                    )}
+
                                 </div>
                             ))}
 
@@ -1691,22 +2731,11 @@ export default function SurveyCreatePage() {
                     </>
                 )}
 
-                {currentSection === 'branching' && (
-                    <>
-                        <CardHeader>
-                            <CardTitle>Branching Logic</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            {/* Add branching logic section content here */}
-                        </CardContent>
-                    </>
-                )}
-
                 <CardFooter className="flex justify-between">
                     <Button
                         variant="outline"
-                        onClick={() => setCurrentSection(prev => 
-                            prev === 'branching' ? 'questions' :
+                        onClick={() => setCurrentSection(prev =>
+                            prev === 'publish' ? 'questions' :
                             prev === 'questions' ? 'basic' : 'basic'
                         )}
                         disabled={currentSection === 'basic'}
@@ -1718,9 +2747,9 @@ export default function SurveyCreatePage() {
                             if (currentSection === 'basic') {
                                 setCurrentSection('questions');
                             } else if (currentSection === 'questions') {
-                                setCurrentSection('branching');
-                                
-                                // Auto-save when reaching the branching (publish) section
+                                setCurrentSection('publish');
+
+                                // Auto-save when reaching the publish section
                                 if (!draft.draftId) {
                                     console.log("Auto-saving when reaching publish section");
                                     await handleManualSave();
@@ -1741,26 +2770,26 @@ export default function SurveyCreatePage() {
                                         console.error("Error loading draft ID from localStorage", e);
                                     }
                                 }
-                            } else if (currentSection === 'branching') {
-                                console.log('Publish button clicked! Current draft state:', { 
-                                    draftId: draft.draftId, 
+                            } else if (currentSection === 'publish') {
+                                console.log('Publish button clicked! Current draft state:', {
+                                    draftId: draft.draftId,
                                     hasTitle: !!draft.draftContent.basicInfo.title,
                                     questionsCount: draft.draftContent.questions.length
                                 });
-                                
+
                                 // Double check draft ID exists before publishing
                                 if (!draft.draftId) {
                                     console.log("No draft ID found, attempting emergency save");
                                     await handleManualSave();
                                 }
-                                
+
                                 handlePublish();
                             }
                         }}
                         disabled={isSubmitting}
                     >
                         {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        {currentSection === 'branching' ? 'Publish' : 'Next'}
+                        {currentSection === 'publish' ? 'Publish' : 'Next'}
                     </Button>
                 </CardFooter>
             </Card>

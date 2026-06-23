@@ -21,7 +21,7 @@ spec:
         
       labels:
         app: auth-service
-        version: v1
+        version: v3
         
     spec:
       # Container configuration

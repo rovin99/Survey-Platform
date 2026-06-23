@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: participants-service-config
+  namespace: default
+  labels:
+    app: participants-management-service
+data:
+  # Application Environment
+  APP_ENV: "production"
+
+  # Database Configuration (non-sensitive)
+  DB_HOST: "postgres-db.database.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "SurveyDb"
+  DB_SSLMODE: "disable"
+
+  # Service Port (Knative injects PORT env var, but our code also reads it)
+  PORT: "8080"
+
+  # JWT Configuration (non-sensitive parts — secret key is in secrets.template.yaml)
+  JWT_ISSUER: "AuthService"
+  JWT_AUDIENCE: "SurveyApp"
+
+  # Inter-service communication
+  SURVEY_SERVICE_URL: "http://survey-management-service.default.svc.cluster.local"
+  AUTH_SERVICE_URL: "http://auth-service.default.svc.cluster.local"
+
+  # MinIO Object Storage
+  MINIO_ENDPOINT: "minio.storage.svc.cluster.local:9000"
+  MINIO_BUCKET: "survey-uploads"
+  MINIO_USE_SSL: "false"
+
+  # CORS Configuration (replace with your production domain)
+  CORS_ORIGINS: "https://your-production-domain.com"
+
+  # Timezone
+  TZ: "UTC"
+
+  # Logging
+  LOG_LEVEL: "info"

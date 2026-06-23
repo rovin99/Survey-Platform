@@ -1,0 +1,134 @@
+name: Deploy to k3s (CD)
+
+# Primary deploy: on push to main (after CI passes — enforce via branch protection), build changed
+# services to GHCR and roll them onto the k3s cluster. Reuses the plain Deployments in k3s/.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Comma-separated: auth,survey,participant,frontend,infra — or "all"'
+        required: true
+        default: 'all'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  REPO: ${{ github.repository }}
+
+jobs:
+  changes:
+    name: Determine targets
+    runs-on: ubuntu-latest
+    outputs:
+      auth: ${{ steps.f.outputs.auth }}
+      survey: ${{ steps.f.outputs.survey }}
+      participant: ${{ steps.f.outputs.participant }}
+      frontend: ${{ steps.f.outputs.frontend }}
+      infra: ${{ steps.f.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: dorny/paths-filter@v3
+        id: pf
+        with:
+          filters: |
+            auth: ['AuthService/**']
+            survey: ['SurveyManagementService/**']
+            participant: ['ParticipantsManagementService/**']
+            frontend: ['frontend/**']
+            infra: ['infrastructure/**', 'smart-proxy/**', 'k3s/**']
+      - name: Merge with manual input
+        id: f
+        run: |
+          MANUAL="${{ github.event.inputs.services }}"
+          want() {
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              [ "$MANUAL" = "all" ] || echo "$MANUAL" | grep -qw "$1"
+            else
+              [ "$2" = "true" ]
+            fi
+          }
+          want auth        "${{ steps.pf.outputs.auth }}"        && echo "auth=true"        >> "$GITHUB_OUTPUT" || echo "auth=false"        >> "$GITHUB_OUTPUT"
+          want survey      "${{ steps.pf.outputs.survey }}"      && echo "survey=true"      >> "$GITHUB_OUTPUT" || echo "survey=false"      >> "$GITHUB_OUTPUT"
+          want participant "${{ steps.pf.outputs.participant }}" && echo "participant=true" >> "$GITHUB_OUTPUT" || echo "participant=false" >> "$GITHUB_OUTPUT"
+          want frontend    "${{ steps.pf.outputs.frontend }}"    && echo "frontend=true"    >> "$GITHUB_OUTPUT" || echo "frontend=false"    >> "$GITHUB_OUTPUT"
+          want infra       "${{ steps.pf.outputs.infra }}"       && echo "infra=true"       >> "$GITHUB_OUTPUT" || echo "infra=false"       >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Build & roll onto k3s
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set kubeconfig (k3s)
+        uses: azure/k8s-set-context@v4
+        with:
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      # First-time / infra+config changes: apply the rendered k3s manifests (idempotent).
+      - name: Apply k3s manifests
+        if: needs.changes.outputs.infra == 'true'
+        run: |
+          HOST="$(echo '${{ vars.FRONTEND_PUBLIC_URL }}' | sed -E 's#^https?://##')"
+          for f in k3s/00-namespaces.yaml k3s/01-secrets.yaml k3s/02-config.yaml k3s/10-postgres.yaml k3s/11-minio.yaml k3s/20-apps.yaml k3s/30-gateway.yaml; do
+            sed -e "s|__REGISTRY__|${REGISTRY}/${REPO}|g" -e "s|__VM_IP__|${HOST}|g" "$f" | kubectl apply -f -
+          done
+
+      - name: Build, push & roll AuthService
+        if: needs.changes.outputs.auth == 'true'
+        run: |
+          IMG=${REGISTRY}/${REPO}/auth-service:${{ github.sha }}
+          docker build -t "$IMG" ./AuthService && docker push "$IMG"
+          kubectl -n default set image deployment/auth-service auth-service="$IMG"
+
+      - name: Build, push & roll SurveyService
+        if: needs.changes.outputs.survey == 'true'
+        run: |
+          IMG=${REGISTRY}/${REPO}/survey-service:${{ github.sha }}
+          docker build -t "$IMG" ./SurveyManagementService && docker push "$IMG"
+          kubectl -n default set image deployment/survey-service survey-service="$IMG"
+
+      - name: Build, push & roll ParticipantsService
+        if: needs.changes.outputs.participant == 'true'
+        run: |
+          IMG=${REGISTRY}/${REPO}/participant-service:${{ github.sha }}
+          docker build -t "$IMG" ./ParticipantsManagementService && docker push "$IMG"
+          kubectl -n default set image deployment/participants-service participants-service="$IMG"
+
+      - name: Build, push & roll Frontend
+        if: needs.changes.outputs.frontend == 'true'
+        run: |
+          IMG=${REGISTRY}/${REPO}/frontend:${{ github.sha }}
+          docker build \
+            --build-arg NEXT_PUBLIC_API_BASE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_AUTH_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_SURVEY_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            -t "$IMG" ./frontend && docker push "$IMG"
+          kubectl -n default set image deployment/frontend frontend="$IMG"
+
+      - name: Wait for rollouts
+        run: |
+          for d in auth-service survey-service participants-service frontend; do
+            kubectl -n default rollout status deploy/$d --timeout=240s || true
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "=== k3s deploy: ${{ github.sha }} ==="
+          kubectl get pods -n default 2>/dev/null || echo "Could not list pods"

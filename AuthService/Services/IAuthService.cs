@@ -11,6 +11,7 @@ public interface IAuthService
     Task LogoutAsync(string refreshToken);
     Task<User> GetUserByIdAsync(int id);
     Task<List<User>> GetAllUsersAsync();
+    Task ChangePasswordAsync(int userId, string currentPassword, string newPassword);
     Task AddUserRoleAsync(int userId, string roleName);
     Task RemoveUserRoleAsync(int userId, string roleName);
     Task<bool> IsAdminAsync(int userId);
@@ -19,6 +20,6 @@ public interface IAuthService
     Task<RefreshToken> GenerateRefreshTokenAsync(User user, string ipAddress);
     
     // Magic Link Authentication
-    Task<string> RequestMagicLinkAsync(string email);
+    Task<string> RequestMagicLinkAsync(string email, string? returnUrl = null);
     Task<(string AccessToken, string RefreshToken, User User)> VerifyMagicLinkAsync(string token);
 }

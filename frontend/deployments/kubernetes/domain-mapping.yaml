@@ -1,0 +1,11 @@
+apiVersion: serving.knative.dev/v1beta1
+kind: DomainMapping
+metadata:
+  # Replace with your actual production domain
+  name: your-production-domain.com
+  namespace: default
+spec:
+  ref:
+    name: frontend
+    kind: Service
+    apiVersion: serving.knative.dev/v1

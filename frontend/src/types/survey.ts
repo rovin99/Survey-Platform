@@ -43,7 +43,6 @@ export interface DraftQuestion {
     question_text: string;
     question_type: string;
     mandatory: boolean;
-    branching_logic: string;
     correct_answers?: string;
     mediaFiles?: DraftMediaFile[];
 }
@@ -89,7 +88,6 @@ export interface ParsedDraftQuestion {
     question_text: string;
     question_type: string;
     mandatory: boolean;
-    branching_logic: string;
     correct_answers?: string;
     options?: string[];
     mediaFiles?: DraftMediaFile[];
@@ -118,4 +116,4 @@ export type WindowWithIdleCallback = Window & {
     requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
 };
 
-export type SurveySection = 'basic' | 'questions' | 'branching';
+export type SurveySection = 'basic' | 'questions' | 'publish';

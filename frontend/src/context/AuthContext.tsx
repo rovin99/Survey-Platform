@@ -4,17 +4,16 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { authService } from '@/services/auth.service';
 import { useRouter } from 'next/navigation';
-import { apiService } from '@/services/api.service';
+import { authConfig } from '@/lib/api-config';
 
-// Fallback API URL for dev if env is missing
-const API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:5171/api/auth';
+const API_URL = authConfig.baseUrl;
 
 interface AuthContextType {
   user: UserResponse | null;
   loading: boolean;
   error: string | null;
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<{ csrfToken?: string }>;
+  login: (username: string, password: string) => Promise<{ user?: UserResponse }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -22,7 +21,7 @@ interface AuthContextType {
 interface UserResponse {
   userId: number;
   username: string;
-  email: string;
+  email?: string;  // Optional - only available from server, not localStorage cache
   roles: string[];
 }
 
@@ -37,25 +36,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = async () => {
     try {
-      // First try server-side verify (preferred after magic-link sets HttpOnly cookies)
-      try {
-        const response = await fetch(`${API_URL}/verify`, {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-          credentials: 'include',
-        });
+      // Try server-side verify
+      const response = await fetch(`${API_URL}${authConfig.paths.verify}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
 
-        if (response.ok) {
-          const result = await response.json();
-          if (result?.success && result?.data?.user) {
-            setUser(result.data.user);
-            setIsAuthenticated(true);
-            return;
-          }
+      if (response.ok) {
+        const result = await response.json();
+        if (result?.success && result?.data?.user) {
+          setUser(result.data.user);
+          setIsAuthenticated(true);
+          return;
         }
-      } catch {}
+      }
 
-      // Fallback to local cached user if server verify not available
+      // Fallback to cached user
       const currentUser = authService.getCurrentUser();
       if (currentUser) {
         setUser(currentUser);
@@ -63,7 +59,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Otherwise, ensure cleared state
       setUser(null);
       setIsAuthenticated(false);
     } catch (error) {
@@ -73,7 +68,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Initialize authentication state
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -81,7 +75,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (isAuthed) {
           await refreshUser();
         } else {
-          // If not authenticated, ensure user state is cleared
           setUser(null);
           setIsAuthenticated(false);
         }
@@ -97,38 +90,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
   }, []);
 
-  // Setup token refresh mechanism
   useEffect(() => {
     let refreshInterval: NodeJS.Timeout;
-  
+
     if (isAuthenticated) {
-      // Refresh every 14 minutes (assuming token lasts 15 minutes)
-      // This gives a 1-minute buffer before the token expires
       refreshInterval = setInterval(async () => {
         try {
-          const response = await authService.refreshToken();
-          
-          // If the refresh returns a CSRF token, update it in the API service
-          if (response && typeof response === 'object' && 'data' in response) {
-            const csrfToken = response.data;
-            if (typeof csrfToken === 'string') {
-              apiService.setCSRFToken(csrfToken);
-            }
-          }
-          
+          await authService.refreshToken();
+          // CSRF token is automatically updated via cookie by backend
           await refreshUser();
         } catch (error) {
           console.error('Token refresh failed:', error);
-          // If refresh fails, log the user out
           logout();
         }
-      }, 14 * 60 * 1000); 
+      }, 55 * 60 * 1000); // Refresh 5 minutes before 1-hour token expires
     }
-  
+
     return () => {
-      if (refreshInterval) {
-        clearInterval(refreshInterval);
-      }
+      if (refreshInterval) clearInterval(refreshInterval);
     };
   }, [isAuthenticated]);
 
@@ -137,20 +116,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       setLoading(true);
       const response = await authService.login({ username, password });
-      
-      // Refresh user data after login
-      await refreshUser();
-      
-      // Return the CSRF token if available in the response
-      const csrfToken = response.data.csrfToken || response.data.CsrfToken;
-      if (csrfToken && typeof csrfToken === 'string') {
-        apiService.setCSRFToken(csrfToken);
+
+      // Extract user data from response for immediate use
+      const userData = response.data.user;
+
+      // Update state
+      if (userData) {
+        setUser(userData);
+        setIsAuthenticated(true);
       }
-      
-      // Don't redirect here - let the login page handle role-based redirects
-      console.log("Login successful, user data updated");
-      
-      return { csrfToken };
+
+      // CSRF token is automatically set via cookie by backend
+      // Return user for immediate redirect use
+      return { user: userData };
     } catch (err) {
       setError('Invalid credentials');
       throw err;
@@ -168,24 +146,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Logout error:', error);
       setError('Logout failed');
-      // Even if server logout fails, clear local state
       setUser(null);
       setIsAuthenticated(false);
     }
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        error,
-        isAuthenticated,
-        login,
-        logout,
-        refreshUser
-      }}
-    >
+    <AuthContext.Provider value={{ user, loading, error, isAuthenticated, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

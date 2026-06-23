@@ -7,6 +7,7 @@ public interface IUserRepository
     Task<User> GetByUsernameAsync(string username);
     Task<User> GetByEmailAsync(string email);
     Task CreateAsync(User user);
+    Task UpdateAsync(User user);
     Task AddUserRoleAsync(int userId, int roleId);
     Task RemoveUserRoleAsync(int userId, int roleId);
     Task<List<User>> GetAllUsersAsync();

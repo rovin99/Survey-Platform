@@ -9,7 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/utils/response"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Utils/response"
 )
 
 func AuthMiddleware() fiber.Handler {
@@ -23,16 +23,26 @@ func AuthMiddleware() fiber.Handler {
 			return response.InternalServerError(c, "JWT secret key not configured on server")
 		}
 
+		// Get token from Authorization header OR cookie
+		var tokenString string
+
+		// First check Authorization header
 		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return response.Unauthorized(c, "Missing or malformed JWT")
+		if authHeader != "" {
+		parts := strings.Split(authHeader, " ")
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenString = parts[1]
+			}
 		}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
+		// If no header, check for accessToken cookie (set by AuthService)
+		if tokenString == "" {
+			tokenString = c.Cookies("accessToken")
+		}
+
+		if tokenString == "" {
 			return response.Unauthorized(c, "Missing or malformed JWT")
 		}
-		tokenString := parts[1]
 
 		// Parse and validate the token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -58,6 +68,17 @@ func AuthMiddleware() fiber.Handler {
 				return response.Unauthorized(c, "Invalid token: sub claim is not a valid user ID")
 			}
 
+			// Extract conductor ID if present (for Conducting role)
+			// Use conductorId as userId for survey operations
+			var effectiveUserId uint = uint(userId)
+			if conductorIdClaim, ok := claims["conductorId"].(string); ok {
+				conductorId, err := strconv.ParseUint(conductorIdClaim, 10, 64)
+				if err == nil {
+					effectiveUserId = uint(conductorId)
+					log.Printf("Using conductorId %d for survey operations (userId: %d)", conductorId, userId)
+				}
+			}
+
 			// Extract roles
 			roles, ok := claims["role"].([]interface{})
 			if !ok {
@@ -77,7 +98,12 @@ func AuthMiddleware() fiber.Handler {
 				c.Locals("roles", roleStrings)
 			}
 
-			c.Locals("user_id", uint(userId))
+			// Extract email (used to scope a participant's assigned surveys)
+			if emailClaim, ok := claims["email"].(string); ok {
+				c.Locals("email", emailClaim)
+			}
+
+			c.Locals("userId", effectiveUserId)
 			return c.Next()
 		}
 
@@ -136,4 +162,63 @@ func RequireRole(requiredRole string) fiber.Handler {
 
 		return c.Next()
 	}
+}
+
+// InternalAPIKeyMiddleware validates internal service-to-service API calls
+// Uses a shared API key for authentication between microservices
+func InternalAPIKeyMiddleware() fiber.Handler {
+	// Load and validate key once at startup, not per-request
+	expectedAPIKey := os.Getenv("INTERNAL_API_KEY")
+	env := os.Getenv("ENVIRONMENT")
+	isProduction := env == "production" || env == "prod"
+
+	if expectedAPIKey == "" {
+		if isProduction {
+			log.Fatal("FATAL: INTERNAL_API_KEY environment variable is required in production")
+		}
+		log.Println("WARNING: INTERNAL_API_KEY not set. Internal API endpoints are UNPROTECTED!")
+		log.Println("WARNING: Set INTERNAL_API_KEY for production deployments")
+	} else if len(expectedAPIKey) < 32 {
+		if isProduction {
+			log.Fatal("FATAL: INTERNAL_API_KEY must be at least 32 characters in production")
+		}
+		log.Printf("WARNING: INTERNAL_API_KEY should be at least 32 characters (got %d)", len(expectedAPIKey))
+	}
+
+	return func(c *fiber.Ctx) error {
+		// If no key configured (dev mode), allow all internal calls with warning
+		if expectedAPIKey == "" {
+			log.Printf("WARNING: Internal API call allowed without key (dev mode): %s %s", c.Method(), c.Path())
+			c.Locals("isInternalCall", true)
+			return c.Next()
+		}
+
+		// Check X-Internal-API-Key header
+		providedKey := c.Get("X-Internal-API-Key")
+		if providedKey == "" {
+			return response.Unauthorized(c, "Internal API key required")
+		}
+
+		// Use constant-time comparison to prevent timing attacks
+		if !secureCompareStrings(providedKey, expectedAPIKey) {
+			log.Printf("SECURITY: Invalid internal API key from IP %s for %s", c.IP(), c.Path())
+			return response.Forbidden(c, "Invalid internal API key")
+		}
+
+		// Mark this as an internal service call
+		c.Locals("isInternalCall", true)
+		return c.Next()
+	}
+}
+
+// secureCompareStrings performs constant-time string comparison
+func secureCompareStrings(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var result byte
+	for i := 0; i < len(a); i++ {
+		result |= a[i] ^ b[i]
+	}
+	return result == 0
 }

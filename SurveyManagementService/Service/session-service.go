@@ -3,7 +3,7 @@ import (
 	"context"
 
 	"github.com/rovin99/Survey-Platform/SurveyManagementService/models"
-	"github.com/rovin99/Survey-Platform/SurveyManagementService/repository"
+	"github.com/rovin99/Survey-Platform/SurveyManagementService/Repository"
 )
 
 type SessionService struct {

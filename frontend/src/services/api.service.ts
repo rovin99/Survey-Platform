@@ -16,7 +16,6 @@ interface RequestOptions {
 class ApiService {
   private baseUrl: string;
   private defaultHeaders: Record<string, string>;
-  private csrfToken: string | null = null;
 
   constructor(options: ApiServiceOptions = {}) {
     this.baseUrl = options.baseUrl || '';
@@ -27,23 +26,18 @@ class ApiService {
     };
   }
 
-  // Set CSRF token to be used in subsequent requests
-  setCSRFToken(token: string) {
-    this.csrfToken = token;
-  }
-
-  // Get CSRF token from cookies
-  getCSRFTokenFromCookie(): string | null {
+  // Get CSRF token from cookie (single source of truth)
+  private getCSRFToken(): string | null {
     if (typeof window === 'undefined') return null;
-    
+
     const name = 'csrf-token=';
     const decodedCookie = decodeURIComponent(document.cookie);
     const cookieArray = decodedCookie.split(';');
-    
+
     for (let i = 0; i < cookieArray.length; i++) {
-      let cookie = cookieArray[i].trim();
+      const cookie = cookieArray[i].trim();
       if (cookie.indexOf(name) === 0) {
-        return cookie.substring(name.length, cookie.length);
+        return cookie.substring(name.length);
       }
     }
     return null;
@@ -52,16 +46,15 @@ class ApiService {
   // Build request headers with CSRF token for mutations
   private buildHeaders(method: string, customHeaders?: Record<string, string>): Record<string, string> {
     const headers = { ...this.defaultHeaders, ...customHeaders };
-    
+
     // Only add CSRF token for non-GET requests
     if (method !== 'GET') {
-      // Try to get token from instance property first, then from cookie
-      const csrfToken = this.csrfToken || this.getCSRFTokenFromCookie();
+      const csrfToken = this.getCSRFToken();
       if (csrfToken) {
         headers['X-CSRF-Token'] = csrfToken;
       }
     }
-    
+
     return headers;
   }
 

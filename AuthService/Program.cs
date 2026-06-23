@@ -1,6 +1,8 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using AuthService.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using AuthService.Services;
 using Npgsql.EntityFrameworkCore.PostgreSQL;
@@ -47,16 +49,15 @@ builder.Configuration["Jwt:Issuer"] = Environment.GetEnvironmentVariable("JWT_IS
 builder.Configuration["Jwt:Audience"] = Environment.GetEnvironmentVariable("JWT_AUDIENCE");
 builder.Configuration["Jwt:DurationInMinutes"] = Environment.GetEnvironmentVariable("JWT_DURATION");
 
-// Add CORS policy for frontend
-builder.Services.AddCors(options =>
+// Note: CORS is configured below in "ConfiguredCorsPolicy" - single source of truth
+
+// Configure forwarded headers for proxy support (ngrok, Kourier)
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
 {
-    options.AddPolicy("AllowFrontend", policy =>
-    {
-        policy.WithOrigins("http://localhost:3000") // Frontend URL
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials(); // Important for cookies
-    });
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();   // Trust all networks
+    options.KnownProxies.Clear();    // Trust all proxies
 });
 
 // Add services to the container.
@@ -76,13 +77,15 @@ builder.Services.AddAntiforgery(options =>
 {
     options.Cookie.Name = "csrf-token";
     options.Cookie.HttpOnly = false; // Allow JavaScript access
-    options.Cookie.SameSite = SameSiteMode.Strict;
-    // Allow HTTP in development, require HTTPS in production
+    options.Cookie.SameSite = SameSiteMode.Lax;  // Lax is secure and works for subdomains
+    // Only require HTTPS in production, not in development (local uses HTTP)
     options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() 
-        ? CookieSecurePolicy.None 
-        : CookieSecurePolicy.Always;
+        ? CookieSecurePolicy.None  // Allow HTTP in development
+        : CookieSecurePolicy.Always;  // Require HTTPS in production
     options.HeaderName = "X-CSRF-TOKEN";
 });
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<ILoginLockoutService, LoginLockoutService>();
 builder.Services.AddScoped<IAuthService, AuthenticationService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IRoleRepository, RoleRepository>();
@@ -99,6 +102,24 @@ builder.Services.AddEmailService(builder.Configuration);
 // Add HTTP client for service-to-service communication
 builder.Services.AddHttpClient();
 
+// Add rate limiting for authentication endpoints (prevents brute force and email bombing)
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    
+    // Rate limit policy for auth endpoints: 5 requests per minute per IP
+    options.AddPolicy("AuthPolicy", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            }));
+});
+
 // Add background services
 builder.Services.AddHostedService<TokenCleanupService>();
 
@@ -110,27 +131,55 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("ConfiguredCorsPolicy", policy =>
     {
+        // Get allowed origins from environment variable (comma-separated for multiple)
+        var allowedOrigins = Environment.GetEnvironmentVariable("CORS_ORIGINS");
+        
         if (builder.Environment.IsDevelopment())
         {
-            // For local development, allow these specific origins.
-            policy.WithOrigins("http://localhost:3000", "http://localhost:5000", "http://localhost:5001", "http://localhost:8080","http://localhost:8081", "http://localhost:3001")
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
+            // Development: localhost origins
+            var devOrigins = new List<string>
+            {
+                "http://localhost:3000",
+                "http://localhost:5000", 
+                "http://localhost:5001",
+                "http://localhost:8080",
+                "http://localhost:8081",
+                "http://localhost:3001"
+            };
+            
+            // Add any additional origins from environment
+            if (!string.IsNullOrEmpty(allowedOrigins))
+            {
+                devOrigins.AddRange(allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(o => o.Trim()));
+            }
+            
+            policy.WithOrigins(devOrigins.ToArray())
+                  .WithHeaders("Content-Type", "Accept", "Authorization", "X-CSRF-TOKEN", "Host")
+                  .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                   .AllowCredentials();
         }
         else
         {
-            // For production, only allow the specific frontend origin.
-            // This URL MUST be configured in your production environment variables.
-            var productionUrl = Environment.GetEnvironmentVariable("PRODUCTION_URL");
-            if (!string.IsNullOrEmpty(productionUrl))
+            // Production: require CORS_ORIGINS environment variable
+            if (string.IsNullOrEmpty(allowedOrigins))
             {
-                policy.WithOrigins(productionUrl)
-                      .AllowAnyHeader()
-                      .AllowAnyMethod()
+                Console.Error.WriteLine("WARNING: CORS_ORIGINS not set in production. CORS will fail.");
+                // Default to no origins - will cause CORS errors (fail secure)
+                policy.WithOrigins()
                       .AllowCredentials();
             }
-            // If PRODUCTION_URL is not set, no origins will be allowed by this policy in production.
+            else
+            {
+                var origins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(o => o.Trim())
+                    .ToArray();
+                    
+                policy.WithOrigins(origins)
+                      .WithHeaders("Content-Type", "Accept", "Authorization", "X-CSRF-TOKEN", "Host")
+                      .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                      .AllowCredentials();
+            }
         }
     });
 });
@@ -185,7 +234,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])),
-            ClockSkew = TimeSpan.Zero // Reduce token lifetime tolerance
+            ClockSkew = TimeSpan.FromSeconds(30)  // Allow 30s tolerance for clock drift between services
         };
     });
 
@@ -198,6 +247,9 @@ using (var scope = app.Services.CreateScope())
     var services = scope.ServiceProvider;
     try
     {
+        // Apply EF Core migrations on startup so the schema exists without a separate migration job.
+        var db = services.GetRequiredService<AppDbContext>();
+        await db.Database.MigrateAsync();
         await DatabaseSeeder.SeedRolesAndUsers(services);
     }
     catch (Exception ex)
@@ -216,11 +268,27 @@ if (app.Environment.IsDevelopment())
 
 // app.UseHttpsRedirection();
 
-// Add CORS middleware - this must be called before Authentication and Authorization
-app.UseCors("AllowFrontend");
+// Configure forwarded headers to detect HTTPS from proxies (ngrok, Kourier)
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | 
+                      Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+});
 
-// Add rate limiting middleware
-// app.UseRateLimiter(); // Temporarily removed
+// Add CORS middleware - this must be called before Authentication and Authorization
+app.UseCors("ConfiguredCorsPolicy");
+
+// Configure cookie policy based on environment
+// In development: allow non-secure cookies for HTTP
+// In production: require secure cookies for HTTPS
+app.UseCookiePolicy(new CookiePolicyOptions
+{
+    MinimumSameSitePolicy = SameSiteMode.Lax,  // Lax is secure default
+    Secure = app.Environment.IsDevelopment() ? CookieSecurePolicy.None : CookieSecurePolicy.Always
+});
+
+// Add rate limiting middleware (protects magic link and auth endpoints)
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -247,3 +315,6 @@ app.MapControllers();
 app.MapCustomHealthChecks();
 
 app.Run();
+
+// Make Program accessible to integration tests
+public partial class Program { }

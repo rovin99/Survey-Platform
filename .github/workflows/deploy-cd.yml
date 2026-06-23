@@ -1,0 +1,97 @@
+name: Deploy to Knative (manual)
+
+# Manual-only Knative deployment. The push-to-main deploy is handled by deploy-k3s-cd.yml.
+# Builds images to GHCR and applies the Knative service manifests with the freshly built image
+# substituted in (no `kn` CLI dependency — kubectl is available on the runner, kn is not).
+on:
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Comma-separated: auth,survey,participant,frontend,infra — or "all"'
+        required: true
+        default: 'all'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  REPO: ${{ github.repository }}
+
+jobs:
+  deploy:
+    name: Build & Deploy to Knative
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set kubeconfig
+        uses: azure/k8s-set-context@v4
+        with:
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Compute targets
+        id: t
+        run: |
+          S="${{ github.event.inputs.services }}"
+          for k in auth survey participant frontend infra; do
+            if [ "$S" = "all" ] || echo "$S" | grep -qw "$k"; then echo "$k=true" >> "$GITHUB_OUTPUT"; else echo "$k=false" >> "$GITHUB_OUTPUT"; fi
+          done
+
+      # Helper: build+push and apply a Knative service with the new image substituted in.
+      - name: Deploy AuthService
+        if: steps.t.outputs.auth == 'true'
+        run: |
+          IMG=${REGISTRY}/${REPO}/auth-service:${{ github.sha }}
+          docker build -t "$IMG" ./AuthService && docker push "$IMG"
+          kubectl apply -f AuthService/deployments/kubernetes/configmap.yaml
+          sed "s#image:.*#image: $IMG#" AuthService/deployments/kubernetes/knative-service.yaml | kubectl apply -f -
+
+      - name: Deploy SurveyService
+        if: steps.t.outputs.survey == 'true'
+        run: |
+          IMG=${REGISTRY}/${REPO}/survey-service:${{ github.sha }}
+          docker build -t "$IMG" ./SurveyManagementService && docker push "$IMG"
+          kubectl apply -f SurveyManagementService/deployments/kubernetes/configmap.yaml
+          sed "s#image:.*#image: $IMG#" SurveyManagementService/deployments/kubernetes/k-native-service.yaml | kubectl apply -f -
+
+      - name: Deploy ParticipantsService
+        if: steps.t.outputs.participant == 'true'
+        run: |
+          IMG=${REGISTRY}/${REPO}/participant-service:${{ github.sha }}
+          docker build -t "$IMG" ./ParticipantsManagementService && docker push "$IMG"
+          kubectl apply -f ParticipantsManagementService/deployments/kubernetes/configmap.yaml
+          sed "s#image:.*#image: $IMG#" ParticipantsManagementService/deployments/kubernetes/knative-service.yaml | kubectl apply -f -
+
+      - name: Deploy Frontend
+        if: steps.t.outputs.frontend == 'true'
+        run: |
+          IMG=${REGISTRY}/${REPO}/frontend:${{ github.sha }}
+          docker build \
+            --build-arg NEXT_PUBLIC_API_BASE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_AUTH_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_SURVEY_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            --build-arg NEXT_PUBLIC_PARTICIPANTS_SERVICE_URL=${{ vars.FRONTEND_PUBLIC_URL }} \
+            -t "$IMG" ./frontend && docker push "$IMG"
+          kubectl apply -f frontend/deployments/kubernetes/configmap.yaml
+          sed "s#image:.*#image: $IMG#" frontend/deployments/kubernetes/knative-service.yaml | kubectl apply -f -
+
+      - name: Deploy Infrastructure
+        if: steps.t.outputs.infra == 'true'
+        run: |
+          kubectl apply -f infrastructure/minio/minio-deployment.yaml
+          kubectl apply -f smart-proxy/deployment.yaml
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "=== Knative deploy: ${{ github.sha }} ==="
+          kubectl get ksvc -n default 2>/dev/null || echo "Could not list Knative services"

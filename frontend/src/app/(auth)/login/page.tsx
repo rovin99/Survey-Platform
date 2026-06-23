@@ -12,16 +12,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
-import { apiService } from "@/services/api.service";
 import { authService } from "@/services/auth.service";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
 import { Mail, Lock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [error, setError] = useState<string>("");
   const { login, loading: authLoading, error: authError, isAuthenticated, user } = useAuth();
   const [formData, setFormData] = useState({
@@ -39,39 +39,36 @@ export default function LoginPage() {
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated && user) {
-      handlePostLoginRedirect();
+      handlePostLoginRedirect(user);
     }
   }, [isAuthenticated, user]);
 
-  const handlePostLoginRedirect = async () => {
-    if (!user) return;
+  const handlePostLoginRedirect = (loggedInUser?: { userId: number; username: string; roles: string[] }) => {
+    const targetUser = loggedInUser || user;
 
-    try {
-      // Check if user has only "User" role (needs role selection)
-      const hasOnlyUserRole = user.roles.length === 1 && user.roles.includes("User");
-      
-      if (hasOnlyUserRole) {
-        console.log("User has only 'User' role, redirecting to role selection");
-        router.push("/role-selection");
-        return;
-      }
-
-      // Check if user has other roles - if so, go to dashboard
-      if (user.roles.length > 1 || !user.roles.includes("User")) {
-        console.log("User has additional roles, redirecting to dashboard");
-        router.push("/dashboard");
-        return;
-      }
-
-      // Fallback - redirect to role selection
-      console.log("Fallback: redirecting to role selection");
-      router.push("/role-selection");
-      
-    } catch (error) {
-      console.error('Error in post-login redirect:', error);
-      // Fallback to role selection if there's an error
-      router.push("/role-selection");
+    if (!targetUser) {
+      console.error('User state not available for redirect');
+      router.replace("/role-selection");
+      return;
     }
+
+    // Check for returnUrl query parameter
+    const returnUrl = searchParams.get('returnUrl');
+    if (returnUrl) {
+      router.replace(returnUrl);
+      return;
+    }
+
+    // Check if user has only "User" role (needs role selection)
+    const hasOnlyUserRole = targetUser.roles.length === 1 && targetUser.roles.includes("User");
+
+    if (hasOnlyUserRole) {
+      router.replace("/role-selection");
+      return;
+    }
+
+    // User has other roles - go to dashboard
+    router.replace("/dashboard");
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -86,16 +83,11 @@ export default function LoginPage() {
     setError("");
 
     try {
-      // Call the login method from auth context
+      // Call the login method from auth context - returns user directly
       const response = await login(formData.username, formData.password);
-      
-      // If login returns a CSRF token, set it in the API service
-      if (response?.csrfToken) {
-        apiService.setCSRFToken(response.csrfToken);
-      }
-
-      // The redirect will be handled by the useEffect above
-      // after the auth context updates the user state
+      // CSRF token is automatically set via cookie by backend
+      // Use returned user directly for redirect (no race condition)
+      handlePostLoginRedirect(response?.user);
     } catch (err: any) {
       setError(err.message || "Invalid username or password");
     }
@@ -107,7 +99,13 @@ export default function LoginPage() {
     setMagicLinkLoading(true);
 
     try {
-      await authService.requestMagicLink(magicLinkData.email);
+      // Normalize email to lowercase to avoid case-sensitivity issues
+      const normalizedEmail = magicLinkData.email.toLowerCase().trim();
+
+      // Get returnUrl from query params to include in magic link
+      const returnUrl = searchParams.get('returnUrl');
+
+      await authService.requestMagicLink(normalizedEmail, returnUrl || undefined);
       setMagicLinkSent(true);
     } catch (err: any) {
       setError(err.message || "Failed to send magic link");
@@ -148,11 +146,11 @@ export default function LoginPage() {
               <form onSubmit={handleSubmit}>
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="username">Username</Label>
+                    <Label htmlFor="username">Email or Username</Label>
                     <Input
                       id="username"
                       type="text"
-                      placeholder="Enter your username"
+                      placeholder="Enter your email or username"
                       value={formData.username}
                       onChange={handleChange}
                       required
@@ -240,5 +238,20 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }

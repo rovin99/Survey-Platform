@@ -12,5 +12,6 @@ namespace AuthService.Repositories
         Task<Participant> UpdateAsync(Participant participant);
         Task DeleteAsync(int id);
         Task<(List<Participant> participants, int total)> ListAsync(int page, int limit);
+        Task<List<Participant>> ListStudentsWithUsersAsync();
     }
 }

@@ -1,0 +1,11 @@
+# Namespaces for the Survey-Platform k3s deployment.
+# `default` is used for the app services + gateway; database and storage isolate stateful infra.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: database
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: storage

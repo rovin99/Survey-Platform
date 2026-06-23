@@ -25,8 +25,9 @@ namespace AuthService.Models
 
     public enum ConductorType
     {
-        INDIVIDUAL,
-        INSTITUTE,
-        COMPANY
+        INDIVIDUAL = 0,
+        ORGANIZATION = 1,
+        ACADEMIC = 2,
+        CORPORATE = 3
     }
 }

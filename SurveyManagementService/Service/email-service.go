@@ -18,19 +18,34 @@ type EmailService struct {
 }
 // NewEmailService initializes a new email service
 func NewEmailService() *EmailService {
-	err := godotenv.Load()
-	if err != nil {
-		log.Printf("Warning: Could not load .env file: %v", err)
-		log.Println("Email service will work in development mode (logging only)")
-	}
+	// Try to load .env file (optional - environment variables take precedence)
+	_ = godotenv.Load()
 
 	EMAIL := os.Getenv("EMAIL")
 	APP_PASSWORD := os.Getenv("APP_PASS")
+	SMTP_SERVER := os.Getenv("SMTP_SERVER")
+	SMTP_PORT := os.Getenv("SMTP_PORT")
+
+	// Defaults to Gmail if not specified
+	if SMTP_SERVER == "" {
+		SMTP_SERVER = "smtp.gmail.com"
+	}
+	if SMTP_PORT == "" {
+		SMTP_PORT = "587"
+	}
+
+	if EMAIL != "" && APP_PASSWORD != "" {
+		log.Printf("Email service configured: %s via %s:%s", EMAIL, SMTP_SERVER, SMTP_PORT)
+	} else {
+		log.Println("Email service not configured - EMAIL or APP_PASS not set")
+		log.Println("Emails will be logged to console only")
+	}
+
     return &EmailService{
-        SMTPServer: "smtp.gmail.com", 
-        Port:       "587",
+        SMTPServer: SMTP_SERVER,
+        Port:       SMTP_PORT,
         Username:   EMAIL,
-        Password:   APP_PASSWORD,    
+        Password:   APP_PASSWORD,
     }
 }
 
@@ -65,6 +80,10 @@ func (s *EmailService) CheckHealth() error {
 	
 	// You could add a test connection here if needed
 	return nil
+}
+
+func (s *EmailService) SendGenericEmail(to, subject, body string) error {
+	return s.sendEmail(s.Username, to, subject, body)
 }
 
 func (s *EmailService) sendEmail(from, to, subject, body string) error {

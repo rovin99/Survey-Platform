@@ -64,5 +64,15 @@ namespace AuthService.Repositories
 
             return (participants, total);
         }
+
+        // All participants (the student roster) with their User joined, newest first.
+        public async Task<List<Participant>> ListStudentsWithUsersAsync()
+        {
+            return await _context.Participants
+                .AsNoTracking()
+                .Include(p => p.User)
+                .OrderByDescending(p => p.CreatedAt)
+                .ToListAsync();
+        }
     }
 }

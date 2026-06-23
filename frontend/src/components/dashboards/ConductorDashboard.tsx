@@ -255,9 +255,9 @@ export default function ConductorDashboard({ showParticipantButton = false, onSw
                   Switch to Participant
                 </Button>
               )}
-              <Button variant="outline" onClick={() => router.push('/students/onboard')}>
+              <Button variant="outline" onClick={() => router.push('/students')}>
                 <Users className="w-4 h-4 mr-2" />
-                Onboard Students
+                Students
               </Button>
               <Button onClick={handleCreateSurvey}>
                 <Plus className="w-4 h-4 mr-2" />

@@ -6,10 +6,9 @@ import * as XLSX from "xlsx";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { ArrowLeft, Upload, Users, Loader2, Eye, EyeOff, CheckCircle2, AlertTriangle, SkipForward } from "lucide-react";
+import { ArrowLeft, Upload, Users, Loader2, Eye, EyeOff, CheckCircle2, AlertTriangle, SkipForward, Download, X } from "lucide-react";
 import { authConfig } from "@/lib/api-config";
 
 interface OnboardResult {
@@ -18,11 +17,29 @@ interface OnboardResult {
   failed: { email: string; reason: string }[];
 }
 
+interface StudentRow {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  rollNo?: string;
+  phone?: string;
+}
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Header aliases → our canonical field. Headers are normalized (lowercased, separators stripped).
+const HEADER_ALIASES: Record<keyof StudentRow, string[]> = {
+  email: ["email", "emailaddress", "mail", "emailid"],
+  firstName: ["firstname", "first", "fname", "givenname"],
+  lastName: ["lastname", "last", "lname", "surname"],
+  rollNo: ["rollno", "roll", "rollnumber", "rollnumberno", "regno", "registrationno"],
+  phone: ["phone", "phonenumber", "phoneno", "mobile", "mobileno", "contact", "contactno"],
+};
 
 export default function OnboardStudentsPage() {
   const router = useRouter();
   const [emailText, setEmailText] = useState("");
+  const [fileStudents, setFileStudents] = useState<StudentRow[]>([]);
   const [defaultPassword, setDefaultPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -34,9 +51,31 @@ export default function OnboardStudentsPage() {
     return [...new Set(tokens)];
   };
 
-  const parsedEmails = parseEmails(emailText);
-  const validEmails = parsedEmails.filter((e) => EMAIL_REGEX.test(e));
-  const invalidEmails = parsedEmails.filter((e) => !EMAIL_REGEX.test(e));
+  // Merge textarea emails + file rows, deduped by email. File rows (with names) win over bare emails.
+  const buildStudents = (): StudentRow[] => {
+    const byEmail = new Map<string, StudentRow>();
+    parseEmails(emailText).forEach((e) => {
+      if (EMAIL_REGEX.test(e)) byEmail.set(e, { email: e });
+    });
+    fileStudents.forEach((s) => {
+      const e = s.email.trim().toLowerCase();
+      if (EMAIL_REGEX.test(e)) byEmail.set(e, { ...s, email: e });
+    });
+    return [...byEmail.values()];
+  };
+
+  const students = buildStudents();
+  const invalidEmails = parseEmails(emailText).filter((e) => !EMAIL_REGEX.test(e));
+
+  const downloadTemplate = () => {
+    const headers = ["Email", "First Name", "Last Name", "Roll No", "Phone"];
+    const example = ["alice@example.com", "Alice", "Kumar", "CS2025001", "9876543210"];
+    const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+    ws["!cols"] = headers.map(() => ({ wch: 20 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Students");
+    XLSX.writeFile(wb, "student-onboard-template.xlsx");
+  };
 
   const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -46,22 +85,52 @@ export default function OnboardStudentsPage() {
       try {
         const workbook = XLSX.read(e.target?.result, { type: "binary" });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-        const found: string[] = [];
+        const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+        // Resolve a value by trying all header aliases for a field (normalize each sheet header).
+        const valueFor = (row: Record<string, unknown>, field: keyof StudentRow): string => {
+          const aliases = HEADER_ALIASES[field];
+          for (const key of Object.keys(row)) {
+            const norm = key.toLowerCase().replace(/[\s._-]/g, "");
+            if (aliases.includes(norm)) return String(row[key] ?? "").trim();
+          }
+          return "";
+        };
+
+        const parsed: StudentRow[] = [];
         rows.forEach((row) => {
-          (row as any[]).forEach((cell) => {
-            const v = cell?.toString()?.trim()?.toLowerCase();
-            if (v && EMAIL_REGEX.test(v)) found.push(v);
+          const email = valueFor(row, "email").toLowerCase();
+          if (!email) return;
+          parsed.push({
+            email,
+            firstName: valueFor(row, "firstName"),
+            lastName: valueFor(row, "lastName"),
+            rollNo: valueFor(row, "rollNo"),
+            phone: valueFor(row, "phone"),
           });
         });
-        if (found.length === 0) {
-          toast.error("No valid emails found in the file");
+
+        // Fallback for files without our headers: scan every cell for bare emails.
+        if (parsed.length === 0) {
+          const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+          raw.forEach((r) => {
+            (r as unknown[]).forEach((cell) => {
+              const v = cell?.toString()?.trim()?.toLowerCase();
+              if (v && EMAIL_REGEX.test(v)) parsed.push({ email: v });
+            });
+          });
+        }
+
+        if (parsed.length === 0) {
+          toast.error("No rows with an email found. Use the template (Download template).");
           return;
         }
-        // Merge with existing, dedupe
-        const merged = [...new Set([...parseEmails(emailText), ...found])];
-        setEmailText(merged.join("\n"));
-        toast.success(`Loaded ${found.length} email(s) from file`);
+
+        // Dedupe within the file by email (later rows win).
+        const deduped = new Map<string, StudentRow>();
+        parsed.forEach((s) => deduped.set(s.email, s));
+        setFileStudents([...deduped.values()]);
+        toast.success(`Loaded ${deduped.size} student(s) from file`);
       } catch (err) {
         console.error("Error parsing file:", err);
         toast.error("Failed to parse file");
@@ -70,11 +139,11 @@ export default function OnboardStudentsPage() {
       }
     };
     reader.readAsBinaryString(file);
-  }, [emailText]);
+  }, []);
 
   const handleOnboard = async () => {
-    if (validEmails.length === 0) {
-      toast.error("Add at least one valid email");
+    if (students.length === 0) {
+      toast.error("Add at least one valid student (paste emails or upload a file)");
       return;
     }
     if (!defaultPassword) {
@@ -88,7 +157,7 @@ export default function OnboardStudentsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ defaultPassword, emails: validEmails }),
+        body: JSON.stringify({ defaultPassword, students }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.success) {
@@ -97,15 +166,19 @@ export default function OnboardStudentsPage() {
       const r: OnboardResult = data.data;
       setResult(r);
       toast.success(`Created ${r.created.length}, skipped ${r.skipped.length}, failed ${r.failed.length}`);
-      // Keep only the emails that failed so the conductor can retry
+      // Keep only the rows that failed so the conductor can retry.
+      const failedEmails = new Set(r.failed.map((f) => f.email.toLowerCase()));
+      setFileStudents((prev) => prev.filter((s) => failedEmails.has(s.email.toLowerCase())));
       setEmailText(r.failed.map((f) => f.email).join("\n"));
-    } catch (err: any) {
+    } catch (err) {
       console.error("Onboard error:", err);
-      toast.error(err.message || "Failed to onboard students");
+      toast.error(err instanceof Error ? err.message : "Failed to onboard students");
     } finally {
       setLoading(false);
     }
   };
+
+  const displayName = (s: StudentRow) => [s.firstName, s.lastName].filter(Boolean).join(" ").trim();
 
   return (
     <div className="container mx-auto p-6 max-w-3xl">
@@ -125,29 +198,85 @@ export default function OnboardStudentsPage() {
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>Student emails</CardTitle>
-          <CardDescription>Paste emails (one per line, or comma/space separated), or upload an Excel/CSV file.</CardDescription>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <CardTitle>Upload student list</CardTitle>
+              <CardDescription>
+                Fill the template with <strong>Email, First Name, Last Name, Roll No, Phone</strong> and upload it.
+                Names, roll no &amp; phone pre-fill each student&apos;s dashboard. Only Email is required.
+              </CardDescription>
+            </div>
+            <Button variant="outline" size="sm" onClick={downloadTemplate} className="shrink-0">
+              <Download className="h-4 w-4 mr-2" /> Download template
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <label className="flex items-center justify-center gap-2 text-sm text-primary cursor-pointer hover:bg-gray-50 border-2 border-dashed rounded-lg py-6">
+            <Upload className="h-4 w-4" /> Upload Excel / CSV (.xlsx, .xls, .csv)
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileUpload} />
+          </label>
+
+          {fileStudents.length > 0 && (
+            <div className="border rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 bg-gray-50 text-sm">
+                <span className="font-medium">{fileStudents.length} student(s) from file</span>
+                <button
+                  type="button"
+                  onClick={() => setFileStudents([])}
+                  className="text-gray-500 hover:text-red-600 flex items-center gap-1"
+                >
+                  <X className="h-3.5 w-3.5" /> Clear
+                </button>
+              </div>
+              <div className="max-h-60 overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 text-left sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Name</th>
+                      <th className="px-3 py-2 font-medium">Email</th>
+                      <th className="px-3 py-2 font-medium">Roll No</th>
+                      <th className="px-3 py-2 font-medium">Phone</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fileStudents.map((s) => {
+                      const valid = EMAIL_REGEX.test(s.email);
+                      return (
+                        <tr key={s.email} className="border-t">
+                          <td className="px-3 py-2">{displayName(s) || <span className="text-gray-400">—</span>}</td>
+                          <td className={`px-3 py-2 ${valid ? "" : "text-red-500"}`}>
+                            {s.email}{!valid && " (invalid)"}
+                          </td>
+                          <td className="px-3 py-2">{s.rollNo || <span className="text-gray-400">—</span>}</td>
+                          <td className="px-3 py-2">{s.phone || <span className="text-gray-400">—</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Or paste emails</CardTitle>
+          <CardDescription>One per line, or comma/space separated. These are added as email-only students (no name).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
           <Textarea
-            rows={8}
+            rows={5}
             placeholder={"alice@example.com\nbob@example.com"}
             value={emailText}
             onChange={(e) => setEmailText(e.target.value)}
             className="font-mono text-sm"
           />
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <label className="flex items-center gap-2 text-sm text-primary cursor-pointer hover:underline">
-              <Upload className="h-4 w-4" /> Upload Excel/CSV
-              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileUpload} />
-            </label>
-            <div className="text-sm text-gray-500">
-              <span className="text-green-600 font-medium">{validEmails.length} valid</span>
-              {invalidEmails.length > 0 && (
-                <span className="text-red-500 ml-2">{invalidEmails.length} invalid</span>
-              )}
-            </div>
-          </div>
+          {invalidEmails.length > 0 && (
+            <div className="text-sm text-red-500">{invalidEmails.length} invalid email(s) ignored</div>
+          )}
         </CardContent>
       </Card>
 
@@ -179,11 +308,11 @@ export default function OnboardStudentsPage() {
         </CardContent>
       </Card>
 
-      <Button onClick={handleOnboard} disabled={loading || validEmails.length === 0 || !defaultPassword} className="w-full" size="lg">
+      <Button onClick={handleOnboard} disabled={loading || students.length === 0 || !defaultPassword} className="w-full" size="lg">
         {loading ? (
           <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Onboarding…</>
         ) : (
-          <><Users className="h-4 w-4 mr-2" /> Onboard {validEmails.length} Student{validEmails.length !== 1 ? "s" : ""}</>
+          <><Users className="h-4 w-4 mr-2" /> Onboard {students.length} Student{students.length !== 1 ? "s" : ""}</>
         )}
       </Button>
 

@@ -209,10 +209,33 @@ namespace AuthService.Services
             return ResponseUtil.Success((participants, total));
         }
 
-        // Bulk-create student participant accounts from a list of emails using one shared default
-        // password. Existing emails are skipped; per-email outcomes are reported. Students log in
-        // with their email + the default password (see AuthenticationService.LoginAsync email resolution).
-        public async Task<ApiResponse<BulkOnboardResult>> BulkOnboardAsync(string defaultPassword, List<string> emails)
+        // Roster of all student participants (name + email + profile) for the conductor Students page.
+        public async Task<ApiResponse<List<StudentSummaryDTO>>> ListStudentsAsync()
+        {
+            var participants = await _participantRepository.ListStudentsWithUsersAsync();
+            var students = participants
+                .Where(p => p.User != null)
+                .Select(p => new StudentSummaryDTO
+                {
+                    ParticipantId = p.ParticipantId,
+                    UserId = p.UserId,
+                    Name = p.User.Username,
+                    Email = p.User.Email,
+                    RollNo = p.RollNo,
+                    PhoneNumber = p.PhoneNumber,
+                    IsActive = p.IsActive,
+                    CreatedAt = p.CreatedAt
+                })
+                .ToList();
+            return ResponseUtil.Success(students);
+        }
+
+        // Bulk-create student participant accounts from a list of student rows using one shared default
+        // password. Existing emails are skipped; per-email outcomes are reported. Students log in with
+        // their email + the default password (see AuthenticationService.LoginAsync email resolution).
+        // Optional first/last name pre-fill the display name; roll no + phone pre-fill the profile so the
+        // participant dashboard shows their details immediately.
+        public async Task<ApiResponse<BulkOnboardResult>> BulkOnboardAsync(string defaultPassword, List<BulkOnboardStudent> students)
         {
             // Enforce the same password policy as self-registration.
             var passwordRegex = @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\da-zA-Z]).{8,}$";
@@ -223,22 +246,22 @@ namespace AuthService.Services
                     "INVALID_PASSWORD");
             }
 
-            if (emails == null || emails.Count == 0)
+            if (students == null || students.Count == 0)
             {
-                return ResponseUtil.Error<BulkOnboardResult>("Provide at least one email", "NO_EMAILS");
+                return ResponseUtil.Error<BulkOnboardResult>("Provide at least one student", "NO_STUDENTS");
             }
 
             var result = new BulkOnboardResult();
             var emailRegex = new System.ComponentModel.DataAnnotations.EmailAddressAttribute();
             var seen = new HashSet<string>();
 
-            foreach (var raw in emails)
+            foreach (var student in students)
             {
-                var email = (raw ?? string.Empty).Trim().ToLowerInvariant();
+                var email = (student?.Email ?? string.Empty).Trim().ToLowerInvariant();
 
                 if (email.Length == 0 || !emailRegex.IsValid(email))
                 {
-                    result.Failed.Add(new BulkOnboardFailure { Email = raw ?? "", Reason = "Invalid email" });
+                    result.Failed.Add(new BulkOnboardFailure { Email = student?.Email ?? "", Reason = "Invalid email" });
                     continue;
                 }
                 if (!seen.Add(email))
@@ -262,10 +285,23 @@ namespace AuthService.Services
                     var (user, _, _) = await _authService.RegisterUserAsync(username, email, defaultPassword, "User");
                     await _authService.AddUserRoleAsync(user.UserId, "Participating");
 
-                    // Profile shell so the participant dashboard/profile works immediately.
+                    // If a name was supplied, use it as the display name. Username is a `text` column and
+                    // doubles as the display name (see GetProfileByUserIdAsync / UpdateProfileAsync).
+                    var fullName = string.Join(" ", new[] { student?.FirstName?.Trim(), student?.LastName?.Trim() }
+                        .Where(part => !string.IsNullOrWhiteSpace(part)));
+                    if (!string.IsNullOrWhiteSpace(fullName))
+                    {
+                        user.Username = fullName;
+                        await _userRepository.UpdateAsync(user);
+                    }
+
+                    // Profile shell (with any roll no / phone from the sheet) so the participant
+                    // dashboard/profile works and is pre-filled immediately.
                     await _participantRepository.AddAsync(new Participant
                     {
                         UserId = user.UserId,
+                        RollNo = string.IsNullOrWhiteSpace(student?.RollNo) ? null : student.RollNo.Trim(),
+                        PhoneNumber = string.IsNullOrWhiteSpace(student?.Phone) ? null : student.Phone.Trim(),
                         ExperienceLevel = ExperienceLevel.BEGINNER,
                         Rating = 0,
                         IsActive = true,

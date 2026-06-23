@@ -15,6 +15,7 @@ namespace AuthService.Services
         Task<ApiResponse<Participant>> UpdateParticipantAsync(int id, ParticipantUpdateRequest request);
         Task<ApiResponse<bool>> DeleteParticipantAsync(int id);
         Task<ApiResponse<(List<Participant> participants, int total)>> ListParticipantsAsync(int page, int limit);
-        Task<ApiResponse<BulkOnboardResult>> BulkOnboardAsync(string defaultPassword, List<string> emails);
+        Task<ApiResponse<List<StudentSummaryDTO>>> ListStudentsAsync();
+        Task<ApiResponse<BulkOnboardResult>> BulkOnboardAsync(string defaultPassword, List<BulkOnboardStudent> students);
     }
 }

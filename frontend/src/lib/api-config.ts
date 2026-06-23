@@ -24,6 +24,8 @@ export const authConfig = {
     participantProfile: '/api/Participant/profile',
     conductorDelete: '/api/Conductor/current',
     bulkOnboard: '/api/Participant/bulk-onboard',
+    students: '/api/Participant/students',
+    changePassword: '/api/auth/change-password',
   }
 };
 

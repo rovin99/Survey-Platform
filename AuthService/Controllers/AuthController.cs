@@ -497,6 +497,33 @@ namespace AuthService.Controllers
         }
 
         [Authorize]
+        [HttpPost("change-password")]
+        public async Task<ActionResult<ApiResponse<object>>> ChangePassword([FromBody] ChangePasswordRequest request)
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            {
+                return Unauthorized(ResponseUtil.Error<object>(
+                    "Invalid token", "INVALID_TOKEN", statusCode: (int)HttpStatusCode.Unauthorized));
+            }
+
+            if (request == null || string.IsNullOrEmpty(request.NewPassword))
+            {
+                return BadRequest(ResponseUtil.Error<object>("New password is required", "VALIDATION_ERROR"));
+            }
+
+            try
+            {
+                await _authService.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword);
+                return Ok(ResponseUtil.Success<object>(new {}, "Password changed successfully"));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ResponseUtil.Error<object>(ex.Message, "CHANGE_PASSWORD_ERROR"));
+            }
+        }
+
+        [Authorize]
         [HttpPost("logout")]
         public async Task<ActionResult<ApiResponse<object>>> Logout()
         {
@@ -761,6 +788,12 @@ namespace AuthService.Controllers
     {
         public string Email { get; set; } = string.Empty;
         public string? ReturnUrl { get; set; }
+    }
+
+    public class ChangePasswordRequest
+    {
+        public string CurrentPassword { get; set; } = string.Empty;
+        public string NewPassword { get; set; } = string.Empty;
     }
 
     public class LoginResponseDTO

@@ -153,6 +153,33 @@ namespace AuthService.Services
         return (accessToken, refreshToken.Token, user);
     }
 
+    // Authenticated self-service password change: verify the current password, enforce the same
+    // complexity policy as registration, then re-hash and store the new one.
+    public async Task ChangePasswordAsync(int userId, string currentPassword, string newPassword)
+    {
+        var user = await _userRepository.GetByIdAsync(userId);
+        if (user == null)
+            throw new Exception("User not found");
+
+        if (string.IsNullOrEmpty(currentPassword) || !BCrypt.Net.BCrypt.Verify(currentPassword, user.PasswordHash))
+            throw new Exception("Current password is incorrect");
+
+        var passwordRegex = @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\da-zA-Z]).{8,}$";
+        if (string.IsNullOrEmpty(newPassword) ||
+            !System.Text.RegularExpressions.Regex.IsMatch(newPassword, passwordRegex))
+        {
+            throw new Exception("New password must be at least 8 characters and include uppercase, lowercase, a digit, and a special character");
+        }
+
+        if (BCrypt.Net.BCrypt.Verify(newPassword, user.PasswordHash))
+            throw new Exception("New password must be different from the current password");
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+        await _userRepository.UpdateAsync(user);
+        _logger.LogInformation("Password changed for UserId: {UserId}", userId);
+    }
+
         public async Task<(string AccessToken, string RefreshToken)> RefreshTokenAsync(string refreshToken)
         {
             var ipAddress = GetIpAddress();

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 using AuthService.Services;
 using AuthService.Models;
 using AuthService.Utils;
@@ -42,7 +44,25 @@ namespace AuthService.Controllers
             if (request == null)
                 return BadRequest(ResponseUtil.BadRequest<object>("Request body is required"));
 
-            var response = await _participantService.BulkOnboardAsync(request.DefaultPassword, request.Emails);
+            // Prefer rich student rows; also accept a plain email list (back-compat) by wrapping
+            // each bare email as an email-only student row.
+            var students = (request.Students ?? new List<BulkOnboardStudent>()).ToList();
+            if (request.Emails != null)
+            {
+                foreach (var email in request.Emails)
+                    students.Add(new BulkOnboardStudent { Email = email });
+            }
+
+            var response = await _participantService.BulkOnboardAsync(request.DefaultPassword, students);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // Conductor-only: roster of all student participant accounts (name, email, roll no, phone, status).
+        [HttpGet("students")]
+        [Authorize(Roles = "Conducting,Admin")]
+        public async Task<IActionResult> ListStudents()
+        {
+            var response = await _participantService.ListStudentsAsync();
             return StatusCode(response.StatusCode, response);
         }
 

@@ -12,8 +12,28 @@ namespace AuthService.Models
         [Required]
         public string DefaultPassword { get; set; } = string.Empty;
 
-        [Required]
+        /// <summary>
+        /// Preferred input: rich student rows (from the Excel template). Email is required per row;
+        /// the rest pre-fill the participant's dashboard (display name, roll no, phone).
+        /// </summary>
+        public List<BulkOnboardStudent> Students { get; set; } = new List<BulkOnboardStudent>();
+
+        /// <summary>
+        /// Backward-compatible plain email list (no name/roll/phone). Merged with <see cref="Students"/>.
+        /// </summary>
         public List<string> Emails { get; set; } = new List<string>();
+    }
+
+    /// <summary>
+    /// A single student row to onboard. Only Email is required.
+    /// </summary>
+    public class BulkOnboardStudent
+    {
+        public string Email { get; set; } = string.Empty;
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public string? RollNo { get; set; }
+        public string? Phone { get; set; }
     }
 
     /// <summary>

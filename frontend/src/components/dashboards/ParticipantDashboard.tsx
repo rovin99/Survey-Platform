@@ -14,6 +14,7 @@ import {
 	CheckCircle2,
 	Clock,
 	LogOut,
+	KeyRound,
 	PlayCircle,
 	Briefcase,
 	User,
@@ -247,6 +248,10 @@ export default function ParticipantDashboard({ showConductorButton = false }: Pa
 									Become Conductor
 								</Button>
 							)}
+							<Button onClick={() => router.push("/change-password")} variant="outline" size="sm">
+								<KeyRound className="h-4 w-4 mr-2" />
+								Change password
+							</Button>
 							<Button onClick={logout} variant="outline" size="sm">
 								<LogOut className="h-4 w-4 mr-2" />
 								Logout

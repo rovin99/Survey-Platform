@@ -93,6 +93,27 @@ export default function SurveyDistributePage() {
     const [expiresAt, setExpiresAt] = useState('');
     const [maxResponses, setMaxResponses] = useState<string>('');
 
+    // Pre-fill recipient emails when arriving from the Students page ("Assign to survey").
+    useEffect(() => {
+        try {
+            const stashed = sessionStorage.getItem('prefillEmails');
+            if (stashed) {
+                const list = JSON.parse(stashed);
+                if (Array.isArray(list) && list.length > 0) {
+                    const cleaned = [...new Set(
+                        list.map((e: unknown) => String(e).trim().toLowerCase()).filter(Boolean)
+                    )] as string[];
+                    setEmails(cleaned);
+                    setActiveTab('invite');
+                    toast.success(`Loaded ${cleaned.length} recipient(s) from your selection`);
+                }
+                sessionStorage.removeItem('prefillEmails');
+            }
+        } catch {
+            /* ignore malformed sessionStorage */
+        }
+    }, []);
+
     // Load survey data
     useEffect(() => {
         const loadSurvey = async () => {
